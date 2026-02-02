@@ -1046,7 +1046,7 @@
                                                         {stock.currentPrice}
                                                     </div>
                                                     <div className={`text-xs font-bold mt-1 flex justify-end gap-1 ${getColor(stock.dailyChange)}`}>
-                                                        {stock.dailyChange > 0 ? '▲' : '▼'} {Math.abs(stock.dailyChange)} ({Math.abs(stock.dailyChangePct).toFixed(2)}%)
+                                                        {stock.dailyChange > 0 ? '▲' : '▼'} {Math.abs(stock.dailyChange).toFixed(2)}({Math.abs(stock.dailyChangePct).toFixed(2)}%)
                                                     </div>
                                                     <div className="text-[10px] text-slate-300 mt-1 flex items-center justify-end gap-1 hover:text-blue-500 cursor-pointer" onClick={(e)=>{e.stopPropagation(); const p=prompt('修正前日收盤價',stock.prevPrice); if(p) setPrices(prev=>({...prev,[stock.code]:{price: stock.currentPrice, prev:parseFloat(p)}}));}}>
                                                         前日({stock.yesterdayDateStr})收盤: {stock.prevPrice}
@@ -1184,5 +1184,6 @@
     </script>
 </body>
 </html>
+
 
 
