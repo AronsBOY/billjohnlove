@@ -560,46 +560,85 @@
             );
         };
 
-        // --- Simple Holdings Modal ---
-        const SimpleHoldingsModal = ({ holdings, onClose }) => (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-                <div className="bg-white rounded-2xl w-full max-w-4xl shadow-2xl p-6 relative max-h-[90vh] flex flex-col">
-                    <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><Icon name="x"/></button>
-                    <h2 className="text-2xl font-bold mb-6 flex items-center gap-2"><Icon name="table" className="text-orange-600"/> 簡易持股表</h2>
-                    <div className="overflow-auto flex-1">
-                        <table className="w-full text-left border-collapse min-w-[500px]">
-                            <thead className="bg-slate-100 text-slate-600 sticky top-0">
-                                <tr>
-                                    <th className="p-4 rounded-tl-lg font-bold">編號</th>
-                                    <th className="p-4 font-bold">股市代號</th>
-                                    <th className="p-4 font-bold">股市名稱</th>
-                                    <th className="p-4 text-right font-bold">買入均價</th>
-                                    <th className="p-4 text-right rounded-tr-lg font-bold">張數及股數</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 text-slate-800">
-                                {holdings.map((stock, index) => {
-                                    const marketStyle = getMarketStyle(stock.meta.market);
-                                    return (
-                                        <tr key={stock.code} className="hover:bg-slate-50 transition-colors">
-                                            <td className="p-4 font-bold text-slate-500">{index + 1}</td>
-                                            <td className="p-4 font-mono font-bold text-lg">{stock.code}</td>
-                                            <td className="p-4 font-bold text-xl">{stock.name}</td>
-                                            <td className="p-4 text-right font-mono font-bold text-lg">{formatDecimal(stock.displayAvgCost)}</td>
-                                            <td className="p-4 text-right">
-                                                <span className="font-bold text-xl">{Math.floor(stock.inventory / 1000)}</span> <span className="text-sm text-slate-500 mr-2">張</span>
-                                                {stock.inventory % 1000 > 0 && <span className="text-slate-500 font-mono">({stock.inventory % 1000} 股)</span>}
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                                {holdings.length === 0 && <tr><td colSpan="5" className="p-12 text-center text-slate-400 text-lg font-bold">目前無持股，請建立倉位！</td></tr>}
-                            </tbody>
-                        </table>
+       // --- Simple Holdings Modal (已修改：新增 LINE 匯出功能) ---
+        const SimpleHoldingsModal = ({ holdings, onClose }) => {
+            
+            // 新增：匯出文字功能
+            const handleExportToLine = () => {
+                const today = new Date();
+                const dateStr = `${today.getFullYear()}.${String(today.getMonth() + 1).padStart(2, '0')}.${String(today.getDate()).padStart(2, '0')}`;
+                
+                let text = `【 ${dateStr} 持股配置報告 】\n\n`;
+                
+                holdings.forEach(stock => {
+                    const cost = stock.displayAvgCost ? stock.displayAvgCost.toFixed(2) : '0.00';
+                    const qty = Math.floor(stock.inventory / 1000); // 計算張數
+                    // 格式：🔹 1802 台玻 成本：47.75｜部位：1 張
+                    text += `🔹 ${stock.code} ${stock.name} 成本：${cost}｜部位：${qty} 張\n`;
+                });
+
+                // 複製到剪貼簿
+                navigator.clipboard.writeText(text).then(() => {
+                    alert("✅ 已複製報告！\n請直接到 LINE 對話框貼上即可。");
+                }).catch(err => {
+                    console.error('複製失敗', err);
+                    alert("複製失敗，請手動選取複製。");
+                });
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+                    <div className="bg-white rounded-2xl w-full max-w-4xl shadow-2xl p-6 relative max-h-[90vh] flex flex-col">
+                        <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><Icon name="x"/></button>
+                        
+                        {/* 標題區塊新增按鈕 */}
+                        <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
+                            <h2 className="text-2xl font-bold flex items-center gap-2">
+                                <Icon name="table" className="text-orange-600"/> 簡易持股表
+                            </h2>
+                            <button 
+                                onClick={handleExportToLine}
+                                className="bg-[#06C755] hover:bg-[#05b54d] text-white px-4 py-2 rounded-lg font-bold shadow flex items-center gap-2 transition-colors w-fit"
+                            >
+                                <Icon name="copy" size={18} /> 複製 LINE 格式
+                            </button>
+                        </div>
+
+                        <div className="overflow-auto flex-1">
+                            <table className="w-full text-left border-collapse min-w-[500px]">
+                                <thead className="bg-slate-100 text-slate-600 sticky top-0">
+                                    <tr>
+                                        <th className="p-4 rounded-tl-lg font-bold">編號</th>
+                                        <th className="p-4 font-bold">股市代號</th>
+                                        <th className="p-4 font-bold">股市名稱</th>
+                                        <th className="p-4 text-right font-bold">買入均價</th>
+                                        <th className="p-4 text-right rounded-tr-lg font-bold">張數及股數</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 text-slate-800">
+                                    {holdings.map((stock, index) => {
+                                        const marketStyle = getMarketStyle(stock.meta.market);
+                                        return (
+                                            <tr key={stock.code} className="hover:bg-slate-50 transition-colors">
+                                                <td className="p-4 font-bold text-slate-500">{index + 1}</td>
+                                                <td className="p-4 font-mono font-bold text-lg">{stock.code}</td>
+                                                <td className="p-4 font-bold text-xl">{stock.name}</td>
+                                                <td className="p-4 text-right font-mono font-bold text-lg">{formatDecimal(stock.displayAvgCost)}</td>
+                                                <td className="p-4 text-right">
+                                                    <span className="font-bold text-xl">{Math.floor(stock.inventory / 1000)}</span> <span className="text-sm text-slate-500 mr-2">張</span>
+                                                    {stock.inventory % 1000 > 0 && <span className="text-slate-500 font-mono">({stock.inventory % 1000} 股)</span>}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                    {holdings.length === 0 && <tr><td colSpan="5" className="p-12 text-center text-slate-400 text-lg font-bold">目前無持股，請建立倉位！</td></tr>}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
-            </div>
-        );
+            );
+        };
 
         // --- Edit Modal ---
         const EditTransactionModal = ({ transaction, onSave, onCancel }) => {
@@ -1145,4 +1184,5 @@
     </script>
 </body>
 </html>
+
 
