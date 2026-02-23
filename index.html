@@ -560,10 +560,10 @@
             );
         };
 
-       // --- Simple Holdings Modal (已修改：新增 LINE 匯出功能) ---
+       // --- Simple Holdings Modal (升級：新增現價與損益、LINE 匯出功能) ---
         const SimpleHoldingsModal = ({ holdings, onClose }) => {
             
-            // 新增：匯出文字功能
+            // 新增：匯出文字功能 (加入現價與損益)
             const handleExportToLine = () => {
                 const today = new Date();
                 const dateStr = `${today.getFullYear()}.${String(today.getMonth() + 1).padStart(2, '0')}.${String(today.getDate()).padStart(2, '0')}`;
@@ -572,9 +572,12 @@
                 
                 holdings.forEach(stock => {
                     const cost = stock.displayAvgCost ? stock.displayAvgCost.toFixed(2) : '0.00';
+                    const currentPrice = stock.currentPrice ? stock.currentPrice.toFixed(2) : '0.00';
                     const qty = Math.floor(stock.inventory / 1000); // 計算張數
-                    // 格式：🔹 1802 台玻 成本：47.75｜部位：1 張
-                    text += `🔹 ${stock.code} ${stock.name} 成本：${cost}｜部位：${qty} 張\n`;
+                    const pl = stock.unrealizedPL > 0 ? `+${formatNumber(stock.unrealizedPL)}` : formatNumber(stock.unrealizedPL);
+                    
+                    // 格式：🔹 1802 台玻 成本：47.75｜現價：50.00｜部位：1 張｜損益：+2,250
+                    text += `🔹 ${stock.code} ${stock.name} 成本：${cost}｜現價：${currentPrice}｜部位：${qty} 張｜損益：${pl}\n`;
                 });
 
                 // 複製到剪貼簿
@@ -588,10 +591,10 @@
 
             return (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-4xl shadow-2xl p-6 relative max-h-[90vh] flex flex-col">
+                    <div className="bg-white rounded-2xl w-full max-w-5xl shadow-2xl p-6 relative max-h-[90vh] flex flex-col">
                         <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><Icon name="x"/></button>
                         
-                        {/* 標題區塊新增按鈕 */}
+                        {/* 標題區塊 */}
                         <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
                             <h2 className="text-2xl font-bold flex items-center gap-2">
                                 <Icon name="table" className="text-orange-600"/> 簡易持股表
@@ -605,25 +608,38 @@
                         </div>
 
                         <div className="overflow-auto flex-1">
-                            <table className="w-full text-left border-collapse min-w-[500px]">
-                                <thead className="bg-slate-100 text-slate-600 sticky top-0">
+                            {/* 加寬表格的最小寬度，避免欄位變多後擠在一起 */}
+                            <table className="w-full text-left border-collapse min-w-[750px]">
+                                <thead className="bg-slate-100 text-slate-600 sticky top-0 whitespace-nowrap">
                                     <tr>
                                         <th className="p-4 rounded-tl-lg font-bold">編號</th>
                                         <th className="p-4 font-bold">股市代號</th>
                                         <th className="p-4 font-bold">股市名稱</th>
                                         <th className="p-4 text-right font-bold">買入均價</th>
+                                        <th className="p-4 text-right font-bold text-blue-800">現在股價</th>
+                                        <th className="p-4 text-right font-bold text-blue-800">未實現損益</th>
                                         <th className="p-4 text-right rounded-tr-lg font-bold">張數及股數</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 text-slate-800">
                                     {holdings.map((stock, index) => {
-                                        const marketStyle = getMarketStyle(stock.meta.market);
                                         return (
                                             <tr key={stock.code} className="hover:bg-slate-50 transition-colors">
                                                 <td className="p-4 font-bold text-slate-500">{index + 1}</td>
                                                 <td className="p-4 font-mono font-bold text-lg">{stock.code}</td>
                                                 <td className="p-4 font-bold text-xl">{stock.name}</td>
                                                 <td className="p-4 text-right font-mono font-bold text-lg">{formatDecimal(stock.displayAvgCost)}</td>
+                                                
+                                                {/* 新增：現在股價 */}
+                                                <td className="p-4 text-right font-mono font-bold text-lg">
+                                                    {formatDecimal(stock.currentPrice)}
+                                                </td>
+                                                
+                                                {/* 新增：未實現損益 (加上顏色判斷) */}
+                                                <td className={`p-4 text-right font-mono font-bold text-lg ${getColor(stock.unrealizedPL)}`}>
+                                                    {stock.unrealizedPL > 0 ? '+' : ''}{formatNumber(stock.unrealizedPL)}
+                                                </td>
+
                                                 <td className="p-4 text-right">
                                                     <span className="font-bold text-xl">{Math.floor(stock.inventory / 1000)}</span> <span className="text-sm text-slate-500 mr-2">張</span>
                                                     {stock.inventory % 1000 > 0 && <span className="text-slate-500 font-mono">({stock.inventory % 1000} 股)</span>}
@@ -631,7 +647,8 @@
                                             </tr>
                                         );
                                     })}
-                                    {holdings.length === 0 && <tr><td colSpan="5" className="p-12 text-center text-slate-400 text-lg font-bold">目前無持股，請建立倉位！</td></tr>}
+                                    {/* 空狀態的合併儲存格也從 5 更新成 7 */}
+                                    {holdings.length === 0 && <tr><td colSpan="7" className="p-12 text-center text-slate-400 text-lg font-bold">目前無持股，請建立倉位！</td></tr>}
                                 </tbody>
                             </table>
                         </div>
@@ -1184,6 +1201,7 @@
     </script>
 </body>
 </html>
+
 
 
 
