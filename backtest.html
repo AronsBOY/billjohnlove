@@ -253,7 +253,7 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
       </div>
 
       <div class="bg-slate-900 text-white rounded-2xl border-4 border-yellow-300 shadow-xl overflow-hidden">
-        <div class="p-5 border-b border-slate-700"><h3 class="font-black text-yellow-300">期末未結算部位</h3><p class="text-xs text-slate-300">這裡不是「持有庫存主頁」，只是交代回測截止日仍未賣光、因此尚未納入結算的資金。</p></div>
+        <div class="p-5 border-b border-slate-700"><h3 class="font-black text-yellow-300">期末未結算部位</h3><p class="text-xs text-slate-300">這裡列出回測截止日仍未歸零的部位。若你知道某檔其實已經賣掉，代表可能漏抓賣出指令，可直接在該卡片做人工查漏覆核。</p></div>
         <div id="openPositions" class="grid md:grid-cols-2 lg:grid-cols-3 gap-3 p-5"></div>
       </div>
       </div>
@@ -330,11 +330,24 @@ function distanceToStock(hit,stock){
  return 0;
 }
 function cleanStockName(name){
- return String(name||'')
+ let s=String(name||'').trim()
   .replace(/^(進階組[:：]?|基本組[:：]?|今天|昨天|新進會員|新會員|手上沒有|沒有|持有|利用|跌停附近的|平盤下的|我們家的|我們家|光看|除了|以及|然後|至於|進場)+/g,'')
   .replace(/^\d+(?:\.\d+)?(?:[-~到]\d+(?:\.\d+)?)?附近的/,'')
   .replace(/^[^A-Za-z\u4e00-\u9fff]+/,'')
   .trim();
+
+ // 若股票前面夾著「買回之前獲利掉一半的」這種敘述，只保留最後真正的股票名稱。
+ if(s.includes('的')){
+   const i=s.lastIndexOf('的');
+   const prefix=s.slice(0,i),tail=s.slice(i+1).trim();
+   if(tail && tail.length<=16 && /買|賣|獲利|停損|加碼|持股|會員|之前|前面|附近|平盤|跌停|今天|昨天|剛剛|剩下/.test(prefix))s=tail;
+ }
+ s=s
+  .replace(/^(?:先|再|重新|同樣|目前|現在|可以|可|建議|買回|買進|賣出|獲利掉|獲利了結|停損|加碼|建立基本持股|建立持股|建立)+/g,'')
+  .replace(/^(?:之前|前面|昨天|今天|剛剛|剩下)+/g,'')
+  .replace(/^[^A-Za-z\u4e00-\u9fff]+/,'')
+  .trim();
+ return s;
 }
 function extractStocks(sentence){
  const re=/([^\s，。；：:、]{1,18})\s*[（(](\d{4})[）)]/g;let m,arr=[];
@@ -547,7 +560,7 @@ function simulate(signals,{infinite,capital,allocation,maxStocks}){
    const basePrice=S.prices.get(s.date+'|'+s.code);
    const price=Number.isFinite(Number(s.price))&&Number(s.price)>0?Number(s.price):basePrice;
    if(!price){skipped.push({...s,reason:'缺少收盤價'});continue}
-   const p=ensure(s.code);p.name=s.name||p.name;
+   const p=ensure(s.code);p.name=cleanStockName(s.name)||p.name;
    if(s.action==='買入'){
      const newStock=p.qty<=0;
      if(!infinite&&newStock&&Object.values(pos).filter(x=>x.qty>0).length>=maxStocks){skipped.push({...s,reason:'已達同時持股上限'});continue}
@@ -556,12 +569,12 @@ function simulate(signals,{infinite,capital,allocation,maxStocks}){
      let amt=qty*price;
      if(!infinite&&amt>cash&&!(Number.isFinite(Number(s.qty))&&Number(s.qty)>0)){qty=Math.floor(cash/price);amt=qty*price}
      if(qty<=0||(!infinite&&amt>cash)){skipped.push({...s,reason:'資金不足'});continue}
-     if(!active[s.code])active[s.code]={code:s.code,name:s.name,start:s.date,buyCost:0,sellProceeds:0,buyQty:0,sellQty:0};
+     if(!active[s.code])active[s.code]={code:s.code,name:cleanStockName(s.name),start:s.date,buyCost:0,sellProceeds:0,buyQty:0,sellQty:0};
      p.cost+=amt;p.qty+=qty;
      const avgAfter=p.qty?p.cost/p.qty:0;
      active[s.code].buyCost+=amt;active[s.code].buyQty+=qty;
      if(!infinite)cash-=amt;filled++;
-     ledger.push({signalId:s.id,date:s.date,time:s.time||'',code:s.code,name:s.name||p.name,action:'買入',price,qty,costPrice:avgAfter,avgCostBefore:avgBefore,avgCostAfter:avgAfter,amount:amt,realizedPnl:0,positionAfter:p.qty,cashAfter:infinite?null:cash,raw:s.raw||'',manual:!!S.tradeOverrides[s.id]});
+     ledger.push({signalId:s.id,date:s.date,time:s.time||'',code:s.code,name:cleanStockName(s.name)||p.name,action:'買入',price,qty,costPrice:avgAfter,avgCostBefore:avgBefore,avgCostAfter:avgAfter,amount:amt,realizedPnl:0,positionAfter:p.qty,cashAfter:infinite?null:cash,raw:s.raw||'',manual:!!S.tradeOverrides[s.id]});
      continue;
    }
    if(p.qty<=0){skipped.push({...s,reason:'無持股可賣'});continue}
@@ -578,7 +591,7 @@ function simulate(signals,{infinite,capital,allocation,maxStocks}){
    p.qty=remaining;
    if(!infinite)cash+=proceeds;filled++;
    if(active[s.code]){active[s.code].sellProceeds+=proceeds;active[s.code].sellQty+=qty}
-   ledger.push({signalId:s.id,date:s.date,time:s.time||'',code:s.code,name:s.name||p.name,action:'賣出',price,qty,costPrice:basis,avgCostBefore:basis,avgCostAfter:p.qty?p.cost/p.qty:0,amount:proceeds,realizedPnl:pnl,positionAfter:p.qty,cashAfter:infinite?null:cash,raw:s.raw||'',manual:!!S.tradeOverrides[s.id]});
+   ledger.push({signalId:s.id,date:s.date,time:s.time||'',code:s.code,name:cleanStockName(s.name)||p.name,action:'賣出',price,qty,costPrice:basis,avgCostBefore:basis,avgCostAfter:p.qty?p.cost/p.qty:0,amount:proceeds,realizedPnl:pnl,positionAfter:p.qty,cashAfter:infinite?null:cash,raw:s.raw||'',manual:!!S.tradeOverrides[s.id]});
    if(p.qty<=0){
      p.qty=0;p.cost=0;
      if(active[s.code]){const r=active[s.code];const roundPnl=r.sellProceeds-r.buyCost;rounds.push({...r,end:s.date,pnl:roundPnl,pct:r.buyCost?roundPnl/r.buyCost*100:0});delete active[s.code]}
@@ -697,6 +710,47 @@ function resetAllTradeEdits(){
  S.tradeOverrides={};S.editingTradeId=null;rerunWithTradeOverrides();
  document.getElementById('exportStatus').textContent='已清除全部手動交易修改。';
 }
+
+function suspiciousExitText(text){
+ return /獲利|了結|賣|出清|停損|減碼|收回|下車|調節|退出|撤出/.test(String(text||''));
+}
+function openPositionCandidates(code,result){
+ const executed=new Set((result.ledger||[]).map(x=>x.signalId));
+ return S.signals
+  .filter(s=>s.code===code && suspiciousExitText(s.sourceRaw||s.raw) && !executed.has(s.id))
+  .sort((a,b)=>((a.date||'')+(a.time||'')).localeCompare((b.date||'')+(b.time||'')));
+}
+async function applyMissedExit(signalId,qtyRule){
+ const s=S.signals.find(x=>x.id===signalId);if(!s)return;
+ S.decisions[signalId]={action:'賣出',qtyRule};
+ // 新增了原本未參與回測的賣出訊號後，補抓該日收盤價。
+ if(!S.prices.has(s.date+'|'+s.code)){
+   try{await fetchAutoPrices();}catch(e){alert('已加入人工賣出，但該日收盤價仍抓不到：'+e.message);}
+ }
+ rerunWithTradeOverrides();
+ document.getElementById('exportStatus').textContent=s.code+' 已加入人工覆核賣出，結算結果已重新計算。';
+}
+function renderOpenPositions(result){
+ const box=document.getElementById('openPositions');if(!box)return;
+ const opens=openRows(result);
+ box.innerHTML=opens.map(p=>{
+   const candidates=openPositionCandidates(p.code,result);
+   const candidateHtml=candidates.length
+    ? '<details class="mt-3 bg-slate-950/40 rounded-xl p-3" data-no-export="true"><summary class="cursor-pointer text-yellow-300 font-bold text-xs">人工查漏覆核 '+candidates.length+' 則疑似訊息</summary><div class="mt-3 space-y-2">'+
+      candidates.map(s=>'<div class="rounded-lg border border-slate-700 p-3 bg-slate-900"><div class="text-[11px] text-slate-400">'+escapeHtml(s.date)+' '+escapeHtml(s.time||'')+'</div><div class="text-xs text-slate-200 mt-1 leading-relaxed">'+escapeHtml(s.sourceRaw||s.raw)+'</div><div class="flex gap-2 mt-2"><button type="button" data-missed-exit="'+escapeHtml(s.id)+'" data-rule="all" class="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-black">確認賣光</button><button type="button" data-missed-exit="'+escapeHtml(s.id)+'" data-rule="half" class="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-black">確認賣一半</button></div></div>').join('')+
+      '</div></details>'
+    : '<div class="mt-3 text-[11px] text-slate-500">沒有找到含賣出語意的漏單候選；可到「每筆買賣明細」手動編輯，或回人工覆核檢查原指令。</div>';
+   return '<div class="bg-slate-800 rounded-xl p-4 border border-slate-700"><div class="flex justify-between gap-2"><div><div class="font-black">'+escapeHtml(p.code)+' '+escapeHtml(cleanStockName(p.name))+'</div><div class="text-xs text-slate-400 mt-1">尚未賣光，因此不計入已結算</div></div><span class="text-yellow-300 font-black">'+p.qty.toLocaleString('zh-TW')+' 股</span></div><div class="grid grid-cols-2 gap-3 mt-3 text-xs"><div><span class="text-slate-400">平均成本</span><b class="block text-white mt-1">'+p.avg.toFixed(2)+'</b></div><div><span class="text-slate-400">占用成本</span><b class="block text-white mt-1">'+fmt(p.cost)+'</b></div></div>'+candidateHtml+'</div>';
+ }).join('')||'<div class="col-span-full text-center text-slate-400 py-6">期末沒有未結算部位</div>';
+
+ box.querySelectorAll('[data-missed-exit]').forEach(b=>b.addEventListener('click',async()=>{
+   const rule=b.dataset.rule;
+   const label=rule==='all'?'賣光':'賣一半';
+   if(!confirm('將這則訊息人工確認為「'+label+'」並重新計算？'))return;
+   b.disabled=true;
+   try{await applyMissedExit(b.dataset.missedExit,rule);}finally{b.disabled=false;}
+ }));
+}
 function renderSettlementMode(){
  if(!S.results)return;const mode=S.resultMode;const result=S.results[mode];const st=roundStats(result,mode);
  document.querySelectorAll('.result-mode').forEach(b=>{const on=b.dataset.resultMode===mode;b.className='result-mode px-3 py-2 rounded-lg text-xs font-black '+(on?'bg-orange-600 text-white':'text-slate-500')});
@@ -713,7 +767,7 @@ function renderSettlementMode(){
  document.getElementById('roundTable').innerHTML=(result.rounds||[]).slice().sort((a,b)=>(a.end||'').localeCompare(b.end||'')).map(r=>{roundCount[r.code]=(roundCount[r.code]||0)+1;return '<tr class="border-t"><td class="p-3 font-bold">'+r.code+' '+r.name+'</td><td class="p-3 text-center">第 '+roundCount[r.code]+' 輪</td><td class="p-3">'+r.start+'</td><td class="p-3">'+r.end+'</td><td class="p-3 text-right">'+fmt(r.buyCost)+'</td><td class="p-3 text-right font-black '+(r.pnl>=0?'text-red-600':'text-green-600')+'">'+fmt(r.pnl)+'</td><td class="p-3 text-right">'+(r.pct>=0?'+':'')+r.pct.toFixed(2)+'%</td></tr>'}).join('')||'<tr><td colspan="7" class="p-6 text-center text-slate-400">尚無完整結算輪次</td></tr>';
  const skips=result.skipped||[];document.getElementById('skipList').innerHTML=skips.slice(0,120).map(s=>'<div class="p-4 text-sm flex justify-between gap-3"><div><b>'+s.date+' '+s.code+' '+s.name+'</b><div class="text-xs text-slate-400 mt-1">'+escapeHtml(s.raw)+'</div></div><span class="text-xs font-bold text-orange-600 shrink-0">'+s.reason+'</span></div>').join('')||'<div class="p-6 text-center text-slate-400">沒有未成交指令</div>';
  renderTradeLedger(result);
- const opens=openRows(result);document.getElementById('openPositions').innerHTML=opens.map(p=>'<div class="bg-slate-800 rounded-xl p-4 border border-slate-700"><div class="flex justify-between gap-2"><div><div class="font-black">'+p.code+' '+p.name+'</div><div class="text-xs text-slate-400 mt-1">尚未賣光，因此不計入已結算</div></div><span class="text-yellow-300 font-black">'+p.qty.toLocaleString('zh-TW')+' 股</span></div><div class="grid grid-cols-2 gap-3 mt-3 text-xs"><div><span class="text-slate-400">平均成本</span><b class="block text-white mt-1">'+p.avg.toFixed(2)+'</b></div><div><span class="text-slate-400">占用成本</span><b class="block text-white mt-1">'+fmt(p.cost)+'</b></div></div></div>').join('')||'<div class="col-span-full text-center text-slate-400 py-6">期末沒有未結算部位</div>';
+ renderOpenPositions(result);
 }
 function renderResults(){
  const {finite,infinite}=S.results;
