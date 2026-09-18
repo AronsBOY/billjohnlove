@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>股市比爾強｜歷史回測實驗室</title>
+<meta name="theme-color" content="#facc15">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
+body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transparent}
+.bg-kline-pattern{background-color:#facc15;background-image:url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M10 50v-10h2v10h-2zm0 20v-10h2v10h-2zm10-30v-15h2v15h-2zm0 25v-15h2v15h-2zm10 10v-20h2v20h-2zm0-30v-10h2v10h-2zm10 20v-25h2v25h-2zm0 15v-5h2v5h-2zm10-40v-10h2v10h-2zm0 45v-25h2v25h-2zm10-15v-10h2v10h-2zm0 20v-5h2v5h-2zm10-40v-5h2v5h-2zm0 35v-20h2v20h-2z' fill='%23ffffff' fill-opacity='0.15' fill-rule='evenodd'/%3E%3C/svg%3E")}
+.header-fun-pattern{background-color:#fbbf24;background-image:radial-gradient(circle at 10% 20%,rgba(255,255,255,.2) 0%,transparent 20%),radial-gradient(circle at 90% 80%,rgba(255,255,255,.2) 0%,transparent 20%)}
+.hide-scrollbar::-webkit-scrollbar{display:none}.hide-scrollbar{scrollbar-width:none}
+.review-selected{outline:3px solid #f59e0b;outline-offset:2px}
+</style>
+</head>
+<body class="bg-kline-pattern min-h-screen text-slate-800">
+<header class="header-fun-pattern sticky top-0 z-30 border-b-4 border-yellow-500 shadow-lg">
+  <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+    <div>
+      <div class="flex items-center gap-2"><span class="bg-slate-900 text-yellow-300 px-2 py-1 rounded-lg font-black text-xs">BILL JOHN</span><h1 class="font-black text-xl md:text-2xl">歷史回測實驗室</h1></div>
+      <p class="text-xs font-bold text-yellow-950/70 mt-1">LINE 指令 → 人工覆核 → 收盤價 → 雙模式資金模擬</p>
+    </div>
+    <a href="./index.html" class="bg-white/90 hover:bg-white text-slate-700 font-bold text-xs px-3 py-2 rounded-xl shadow">回原版 APP</a>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
+  <section class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="bg-gradient-to-br from-yellow-100 to-orange-100 rounded-2xl p-4 shadow-lg border-4 border-yellow-300">
+      <p class="text-slate-500 text-xs font-bold">老師訊息</p><div id="kMsg" class="text-3xl font-black mt-1">0</div>
+    </div>
+    <div class="bg-white rounded-2xl p-4 shadow-lg border-2 border-yellow-200">
+      <p class="text-slate-500 text-xs font-bold">交易指令</p><div id="kSig" class="text-3xl font-black mt-1">0</div>
+    </div>
+    <div class="bg-white rounded-2xl p-4 shadow-lg border-2 border-yellow-200">
+      <p class="text-slate-500 text-xs font-bold">待人工覆核</p><div id="kReview" class="text-3xl font-black mt-1 text-orange-600">0</div>
+    </div>
+    <div class="bg-white rounded-2xl p-4 shadow-lg border-2 border-yellow-200">
+      <p class="text-slate-500 text-xs font-bold">價格基準</p><div class="text-lg font-black mt-2">當日收盤價</div>
+    </div>
+  </section>
+
+  <section class="bg-yellow-50/90 rounded-3xl p-5 shadow-xl border-2 border-yellow-200">
+    <div class="flex gap-2 overflow-x-auto hide-scrollbar pb-1">
+      <button data-tab="input" class="tab bg-orange-600 text-white shadow-lg px-4 py-2 rounded-xl font-bold whitespace-nowrap">① 匯入紀錄</button>
+      <button data-tab="review" class="tab bg-white text-slate-500 px-4 py-2 rounded-xl font-bold whitespace-nowrap">② 人工覆核</button>
+      <button data-tab="simulate" class="tab bg-white text-slate-500 px-4 py-2 rounded-xl font-bold whitespace-nowrap">③ 回測設定</button>
+      <button data-tab="result" class="tab bg-white text-slate-500 px-4 py-2 rounded-xl font-bold whitespace-nowrap">④ 結果</button>
+    </div>
+
+    <div id="panel-input" class="panel mt-5 space-y-5">
+      <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+        <div class="flex items-center gap-2 font-black text-lg"><i data-lucide="upload"></i> 匯入 LINE 聊天紀錄</div>
+        <p class="text-sm text-slate-500 mt-1">只抓「[葉宇乘-進階組:]」區塊。群友聊天、Bot 回覆、你自己的持股與結算訊息全部排除。</p>
+        <input id="fileInput" type="file" accept=".txt,text/plain" class="mt-4 block w-full text-sm file:mr-4 file:rounded-xl file:border-0 file:bg-orange-600 file:px-4 file:py-3 file:font-bold file:text-white hover:file:bg-orange-700">
+      </div>
+      <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+        <div class="flex justify-between gap-3 items-center"><div><h3 class="font-black">辨識規則</h3><p class="text-xs text-slate-400">第一版採規則引擎；曖昧案例全部送人工覆核。</p></div><span class="text-xs bg-yellow-100 text-yellow-800 font-bold px-3 py-1 rounded-full">不寫入正式 Bot</span></div>
+        <div class="grid md:grid-cols-2 gap-3 mt-4 text-sm">
+          <div class="bg-red-50 border border-red-100 rounded-xl p-3"><b class="text-red-700">買入</b><p class="mt-1 text-slate-600">建立基本持股、建立持股、開始佈局、加碼、買進。</p></div>
+          <div class="bg-emerald-50 border border-emerald-100 rounded-xl p-3"><b class="text-emerald-700">賣出</b><p class="mt-1 text-slate-600">獲利了結、停損賣出、全數、賣一半、減碼。</p></div>
+          <div class="bg-blue-50 border border-blue-100 rounded-xl p-3"><b class="text-blue-700">特殊條件</b><p class="mt-1 text-slate-600">新會員、有持股不用加碼、沒加碼過第二次等，保留條件欄位。</p></div>
+          <div class="bg-slate-50 border border-slate-200 rounded-xl p-3"><b>不執行</b><p class="mt-1 text-slate-600">續抱、看看、等機會、單純轉換建議、心得分享。</p></div>
+        </div>
+      </div>
+      <button id="parseBtn" class="w-full bg-slate-900 hover:bg-slate-800 text-yellow-300 py-4 rounded-2xl font-black shadow-lg disabled:opacity-40" disabled>開始解析 LINE 指令</button>
+    </div>
+
+    <div id="panel-review" class="panel hidden mt-5">
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-5 border-b flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div><h3 class="font-black text-lg">人工覆核佇列</h3><p class="text-sm text-slate-500">必檢：賣半／賣光／停損／換股／條件句／多股票訊息；另加一般指令抽樣。</p></div>
+          <div class="text-sm font-bold"><span id="reviewDone">0</span> / <span id="reviewTotal">0</span> 已確認</div>
+        </div>
+        <div id="reviewList" class="divide-y max-h-[65vh] overflow-y-auto"></div>
+      </div>
+    </div>
+
+    <div id="panel-simulate" class="panel hidden mt-5 space-y-5">
+      <div class="grid md:grid-cols-2 gap-5">
+        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+          <div class="font-black text-lg flex items-center gap-2"><i data-lucide="wallet"></i> 有限本金</div>
+          <label class="block text-xs text-slate-500 font-bold mt-4">起始本金</label>
+          <input id="capitalInput" type="number" value="5000000" min="100000" step="100000" class="mt-1 w-full border rounded-xl px-4 py-3 font-mono font-black text-xl">
+          <label class="block text-xs text-slate-500 font-bold mt-4">單一股票目標配額</label>
+          <input id="allocationInput" type="number" value="1000000" min="100000" step="100000" class="mt-1 w-full border rounded-xl px-4 py-3 font-mono font-bold">
+          <label class="block text-xs text-slate-500 font-bold mt-4">最多同時持股檔數</label>
+          <input id="maxStocksInput" type="number" value="5" min="1" max="20" class="mt-1 w-full border rounded-xl px-4 py-3 font-mono font-bold">
+          <div class="mt-4 bg-yellow-50 rounded-xl p-3 text-xs text-slate-600">沿用你原始概念：500 萬本金、同時最多 5 檔、每檔約 100 萬。高價股或超過配額時可改零股，以「盡量不超過單檔配額」為原則。</div>
+        </div>
+        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+          <div class="font-black text-lg flex items-center gap-2"><i data-lucide="infinity"></i> 無限本金</div>
+          <div class="mt-4 space-y-3 text-sm">
+            <div class="p-3 rounded-xl bg-slate-50"><b>每一筆有效買入都執行</b><p class="text-slate-500 mt-1">不受現金與同時持股檔數限制。</p></div>
+            <div class="p-3 rounded-xl bg-slate-50"><b>賣一半</b><p class="text-slate-500 mt-1">賣出當下庫存 50%。</p></div>
+            <div class="p-3 rounded-xl bg-slate-50"><b>賣光 / 停損 / 獲利了結</b><p class="text-slate-500 mt-1">持股歸零，完成一個操作輪次。</p></div>
+          </div>
+        </div>
+      </div>
+      <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+        <h3 class="font-black">歷史收盤價</h3>
+        <p class="text-sm text-slate-500 mt-1">先用「收盤價表」匯入，格式每行：日期,代號,收盤價。下一版再接自動抓價來源，避免靜態 GitHub Pages 被 CORS 或 API 限流卡住。</p>
+        <textarea id="priceInput" class="mt-3 w-full h-40 border rounded-xl p-3 font-mono text-sm" placeholder="2026-01-05,3081,618&#10;2026-01-05,2360,856"></textarea>
+      </div>
+      <button id="runBtn" class="w-full bg-orange-600 hover:bg-orange-700 text-white py-4 rounded-2xl font-black shadow-lg">執行雙模式回測</button>
+    </div>
+
+    <div id="panel-result" class="panel hidden mt-5 space-y-5">
+      <div class="grid md:grid-cols-2 gap-5">
+        <div class="bg-gradient-to-br from-yellow-100 to-orange-100 rounded-2xl p-5 border-4 border-yellow-300 shadow-lg">
+          <p class="text-xs font-black text-slate-500">有限本金</p><div id="finitePnl" class="text-3xl font-black mt-1">$0</div>
+          <div class="grid grid-cols-2 gap-3 mt-4 text-sm"><div><span class="text-slate-500">期末現金</span><b id="finiteCash" class="block">$0</b></div><div><span class="text-slate-500">資金不足</span><b id="finiteSkip" class="block">0</b></div></div>
+        </div>
+        <div class="bg-white rounded-2xl p-5 border-2 border-yellow-200 shadow-lg">
+          <p class="text-xs font-black text-slate-500">無限本金</p><div id="infinitePnl" class="text-3xl font-black mt-1">$0</div>
+          <div class="grid grid-cols-2 gap-3 mt-4 text-sm"><div><span class="text-slate-500">完成輪次</span><b id="infiniteRounds" class="block">0</b></div><div><span class="text-slate-500">有效交易</span><b id="infiniteTrades" class="block">0</b></div></div>
+        </div>
+      </div>
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-5 border-b"><h3 class="font-black">操作輪次</h3><p class="text-xs text-slate-500">持股歸零 = 一輪完成；之後重新買入 = 新一輪。</p></div>
+        <div class="overflow-x-auto"><table class="w-full text-sm"><thead class="bg-slate-50"><tr><th class="p-3 text-left">模式</th><th class="p-3 text-left">股票</th><th class="p-3 text-left">開始</th><th class="p-3 text-left">結束</th><th class="p-3 text-right">損益</th><th class="p-3 text-right">%</th></tr></thead><tbody id="roundTable"></tbody></table></div>
+      </div>
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-5 border-b"><h3 class="font-black">有限本金未成交指令</h3></div>
+        <div id="skipList" class="divide-y"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const S={raw:'',messages:[],signals:[],review:[],decisions:{},prices:new Map(),results:null};
+const fmt=n=>'$'+Math.round(n||0).toLocaleString('zh-TW');
+const dateNorm=s=>String(s||'').replace(/\./g,'-').replace(/\//g,'-');
+function showTab(name){
+ document.querySelectorAll('.panel').forEach(x=>x.classList.add('hidden'));
+ document.getElementById('panel-'+name).classList.remove('hidden');
+ document.querySelectorAll('.tab').forEach(b=>{const on=b.dataset.tab===name;b.className='tab px-4 py-2 rounded-xl font-bold whitespace-nowrap '+(on?'bg-orange-600 text-white shadow-lg':'bg-white text-slate-500')});
+}
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.tab)));
+document.getElementById('fileInput').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;S.raw=await f.text();document.getElementById('parseBtn').disabled=false;});
+
+function parseLine(text){
+ const lines=text.split(/\r?\n/),out=[];let date='',cur=null;
+ const flush=()=>{if(cur&&cur.text.trim())out.push(cur);cur=null};
+ for(const line0 of lines){const line=line0.trimEnd();if(!line.trim())continue;
+   const dm=line.match(/^(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})/);if(dm&&!/^\d{1,2}:\d{2}/.test(line)){flush();date=dm[1]+'-'+String(dm[2]).padStart(2,'0')+'-'+String(dm[3]).padStart(2,'0');continue}
+   const tm=line.match(/^(\d{1,2}:\d{2})\s+(.+?)\s+(\[葉宇乘-進階組:\].*)$/);
+   if(tm){flush();cur={date,time:tm[1],sender:tm[2],text:tm[3]};continue}
+   if(cur)cur.text+='\n'+line.trim();
+ }flush();return out;
+}
+function classifyText(m){
+ const raw=m.text.replace(/^\[葉宇乘-進階組:\]\s*/,'').trim();
+ const stockRe=/([A-Za-z\u4e00-\u9fff*\-]+)?\s*[（(](\d{4})[）)]/g;let mm,stocks=[];
+ while((mm=stockRe.exec(raw)))stocks.push({name:(mm[1]||'').trim(),code:mm[2]});
+ const uniq=[];stocks.forEach(x=>{if(!uniq.some(y=>y.code===x.code))uniq.push(x)});
+ if(!uniq.length)return[];
+ return uniq.map(st=>{
+   let action='忽略',qtyRule='',reason=[],confidence=.9;
+   const sellHalf=/獲利一半|賣一半|減碼一半|一半.*獲利|獲利減碼一半/.test(raw);
+   const sellAll=/全數獲利了結|全數.*出|獲利了結|停損賣出|停損出場|停損|出清|賣光|資金收回/.test(raw);
+   const buy=/建立基本持股|建立持股|建立回基本持股|開始佈局|先.*建立.*持股|加碼|買進|進場/.test(raw);
+   const hold=/續抱|持股都續抱|不用動|不必動作|沒有動作/.test(raw);
+   const correction=/更正|沒有要買|打太快/.test(raw);
+   if(correction){action='忽略';reason.push('更正/撤銷語意');confidence=.55}
+   else if(sellHalf){action='賣出';qtyRule='half';reason.push('部分賣出');}
+   else if(sellAll){action='賣出';qtyRule='all';reason.push('完整出場');}
+   else if(buy&&!hold){action='買入';qtyRule='one_lot';reason.push('明確買入/加碼');}
+   else {reason.push('沒有明確執行動作');}
+   if(/新進會員|新會員/.test(raw))reason.push('含新會員條件');
+   if(/有持股.*不用加碼|有持股.*不必加碼|沒加碼過|沒有持股|沒持股/.test(raw))reason.push('持股條件句');
+   if(/轉進|轉入|轉去|換股|轉移/.test(raw))reason.push('換股語意');
+   if(uniq.length>1)reason.push('同句多股票');
+   const price=(raw.match(/(\d+(?:\.\d+)?)\s*[-~到]\s*(\d+(?:\.\d+)?)/)||[]);
+   return {id:m.date+'-'+m.time+'-'+st.code,date:m.date,time:m.time,code:st.code,name:st.name,action,qtyRule,suggested:price.length?price[1]+'-'+price[2]:'',raw,reason:reason.join('、'),confidence};
+ });
+}
+function forceReview(s){return s.action==='賣出'||/條件|換股|多股票|更正/.test(s.reason)||s.confidence<.8||Math.abs(hash(s.id))%20===0}
+function hash(x){let h=0;for(let i=0;i<x.length;i++)h=((h<<5)-h)+x.charCodeAt(i)|0;return h}
+function renderReview(){
+ const box=document.getElementById('reviewList');box.innerHTML='';S.review.forEach(s=>{
+   const d=document.createElement('div');d.className='p-4 bg-white';d.dataset.id=s.id;
+   d.innerHTML='<div class="flex justify-between gap-3"><div><b>'+s.date+' '+s.time+'　'+s.code+' '+s.name+'</b><div class="text-xs text-slate-400 mt-1">系統：'+s.action+(s.qtyRule?' / '+s.qtyRule:'')+'｜'+s.reason+'</div></div><span class="state text-xs font-bold text-orange-600">待確認</span></div><div class="bg-slate-50 rounded-xl p-3 mt-3 text-sm leading-relaxed">'+escapeHtml(s.raw)+'</div><div class="flex gap-2 flex-wrap mt-3"><button data-v="ok" class="px-3 py-2 rounded-lg bg-emerald-100 text-emerald-700 font-bold text-xs">✓ 正確</button><button data-v="half" class="px-3 py-2 rounded-lg bg-blue-100 text-blue-700 font-bold text-xs">賣一半</button><button data-v="all" class="px-3 py-2 rounded-lg bg-blue-100 text-blue-700 font-bold text-xs">賣光</button><button data-v="buy" class="px-3 py-2 rounded-lg bg-red-100 text-red-700 font-bold text-xs">買入</button><button data-v="ignore" class="px-3 py-2 rounded-lg bg-slate-200 text-slate-700 font-bold text-xs">非指令</button></div>';
+   d.querySelectorAll('button').forEach(b=>b.onclick=()=>{const v=b.dataset.v;if(v==='ok')S.decisions[s.id]={};if(v==='half')S.decisions[s.id]={action:'賣出',qtyRule:'half'};if(v==='all')S.decisions[s.id]={action:'賣出',qtyRule:'all'};if(v==='buy')S.decisions[s.id]={action:'買入',qtyRule:'one_lot'};if(v==='ignore')S.decisions[s.id]={action:'忽略',qtyRule:''};d.querySelector('.state').textContent='已覆核';d.classList.add('review-selected');updateReviewDone()};box.appendChild(d);
+ });document.getElementById('reviewTotal').textContent=S.review.length;updateReviewDone();
+}
+function updateReviewDone(){document.getElementById('reviewDone').textContent=Object.keys(S.decisions).length}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
+document.getElementById('parseBtn').onclick=()=>{
+ S.messages=parseLine(S.raw);S.signals=S.messages.flatMap(classifyText);S.review=S.signals.filter(forceReview);S.decisions={};
+ document.getElementById('kMsg').textContent=S.messages.length;document.getElementById('kSig').textContent=S.signals.filter(x=>x.action==='買入'||x.action==='賣出').length;document.getElementById('kReview').textContent=S.review.length;renderReview();showTab('review');lucide.createIcons();
+};
+
+function parsePrices(){
+ const m=new Map();document.getElementById('priceInput').value.split(/\r?\n/).forEach(l=>{const p=l.split(/[,\t]/).map(x=>x.trim());if(p.length>=3&&/^\d{4}$/.test(p[1])&&Number.isFinite(Number(p[2])))m.set(dateNorm(p[0])+'|'+p[1],Number(p[2]))});return m;
+}
+function validatedSignals(){return S.signals.map(s=>Object.assign({},s,S.decisions[s.id]||{})).filter(s=>s.action==='買入'||s.action==='賣出').sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time))}
+function buyQty(price,allocation){if(price<=0)return 0;const shares=Math.floor(allocation/price);return Math.max(1,shares)}
+function simulate(signals,{infinite,capital,allocation,maxStocks}){
+ let cash=infinite?Infinity:capital,realized=0,filled=0,skipped=[];const pos={},rounds=[],active={};
+ const ensure=c=>pos[c]||(pos[c]={qty:0,cost:0,name:''});
+ for(const s of signals){const price=S.prices.get(s.date+'|'+s.code);if(!price){skipped.push({...s,reason:'缺少收盤價'});continue}const p=ensure(s.code);p.name=s.name||p.name;
+   if(s.action==='買入'){
+     const newStock=p.qty<=0;if(!infinite&&newStock&&Object.values(pos).filter(x=>x.qty>0).length>=maxStocks){skipped.push({...s,reason:'已達同時持股上限'});continue}
+     let qty=infinite?1000:buyQty(price,allocation);let amt=qty*price;
+     if(!infinite&&amt>cash){qty=Math.floor(cash/price);amt=qty*price}
+     if(qty<=0||(!infinite&&amt>cash)){skipped.push({...s,reason:'資金不足'});continue}
+     if(!active[s.code])active[s.code]={code:s.code,name:s.name,start:s.date,buyCost:0,sellProceeds:0,buyQty:0,sellQty:0};
+     p.cost+=amt;p.qty+=qty;active[s.code].buyCost+=amt;active[s.code].buyQty+=qty;if(!infinite)cash-=amt;filled++;continue;
+   }
+   if(p.qty<=0){skipped.push({...s,reason:'無持股可賣'});continue}
+   const qty=s.qtyRule==='half'?Math.max(1,Math.floor(p.qty/2)):p.qty;const avg=p.cost/p.qty;const proceeds=qty*price;realized+=(price-avg)*qty;p.cost-=avg*qty;p.qty-=qty;if(!infinite)cash+=proceeds;filled++;
+   if(active[s.code]){active[s.code].sellProceeds+=proceeds;active[s.code].sellQty+=qty}
+   if(p.qty<=0){p.qty=0;p.cost=0;if(active[s.code]){const r=active[s.code];const pnl=r.sellProceeds-r.buyCost;rounds.push({...r,end:s.date,pnl,pct:r.buyCost?pnl/r.buyCost*100:0});delete active[s.code]}}
+ }
+ return{cash,realized,filled,skipped,rounds,pos};
+}
+document.getElementById('runBtn').onclick=()=>{
+ S.prices=parsePrices();const cap=Number(document.getElementById('capitalInput').value),allocation=Number(document.getElementById('allocationInput').value),maxStocks=Number(document.getElementById('maxStocksInput').value);
+ if(!Number.isFinite(cap)||cap<=0||!Number.isFinite(allocation)||allocation<=0||!Number.isFinite(maxStocks)||maxStocks<1){alert('請檢查本金／單檔配額／持股上限');return}
+ const sig=validatedSignals();const finite=simulate(sig,{infinite:false,capital:cap,allocation,maxStocks});const infinite=simulate(sig,{infinite:true,capital:0,allocation,maxStocks:999});
+ S.results={finite,infinite};renderResults();showTab('result');
+};
+function renderResults(){
+ const {finite,infinite}=S.results;document.getElementById('finitePnl').textContent=fmt(finite.realized);document.getElementById('finiteCash').textContent=fmt(finite.cash);document.getElementById('finiteSkip').textContent=finite.skipped.filter(x=>x.reason==='資金不足'||x.reason.includes('上限')).length;document.getElementById('infinitePnl').textContent=fmt(infinite.realized);document.getElementById('infiniteRounds').textContent=infinite.rounds.length;document.getElementById('infiniteTrades').textContent=infinite.filled;
+ const rows=[...finite.rounds.map(r=>({...r,mode:'有限'})),...infinite.rounds.map(r=>({...r,mode:'無限'}))].sort((a,b)=>(a.end||'').localeCompare(b.end||''));document.getElementById('roundTable').innerHTML=rows.map(r=>'<tr class="border-t"><td class="p-3">'+r.mode+'</td><td class="p-3 font-bold">'+r.code+' '+r.name+'</td><td class="p-3">'+r.start+'</td><td class="p-3">'+r.end+'</td><td class="p-3 text-right font-black '+(r.pnl>=0?'text-red-600':'text-green-600')+'">'+fmt(r.pnl)+'</td><td class="p-3 text-right">'+r.pct.toFixed(2)+'%</td></tr>').join('')||'<tr><td colspan="6" class="p-6 text-center text-slate-400">尚無完整結算輪次</td></tr>';
+ const skips=finite.skipped;document.getElementById('skipList').innerHTML=skips.slice(0,100).map(s=>'<div class="p-4 text-sm flex justify-between gap-3"><div><b>'+s.date+' '+s.code+' '+s.name+'</b><div class="text-xs text-slate-400 mt-1">'+escapeHtml(s.raw)+'</div></div><span class="text-xs font-bold text-orange-600 shrink-0">'+s.reason+'</span></div>').join('')||'<div class="p-6 text-center text-slate-400">沒有未成交指令</div>';
+}
+lucide.createIcons();
+</script>
+</body>
+</html>
