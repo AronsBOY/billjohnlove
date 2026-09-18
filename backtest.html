@@ -101,11 +101,26 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
         </div>
       </div>
       <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-        <h3 class="font-black">歷史收盤價</h3>
-        <p class="text-sm text-slate-500 mt-1">先用「收盤價表」匯入，格式每行：日期,代號,收盤價。下一版再接自動抓價來源，避免靜態 GitHub Pages 被 CORS 或 API 限流卡住。</p>
-        <textarea id="priceInput" class="mt-3 w-full h-40 border rounded-xl p-3 font-mono text-sm" placeholder="2026-01-05,3081,618&#10;2026-01-05,2360,856"></textarea>
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <h3 class="font-black">歷史收盤價</h3>
+            <p class="text-sm text-slate-500 mt-1">回測時會自動依「日期＋股票代號」抓當日收盤價；抓不到的才會列入缺漏。</p>
+          </div>
+          <button id="fetchPricesBtn" type="button" class="bg-slate-900 hover:bg-slate-800 text-yellow-300 px-4 py-3 rounded-xl font-black">自動抓收盤價</button>
+        </div>
+        <div class="mt-4 grid grid-cols-3 gap-3 text-sm">
+          <div class="bg-slate-50 rounded-xl p-3"><span class="text-slate-400 text-xs">需要價格</span><b id="priceNeed" class="block text-lg mt-1">0</b></div>
+          <div class="bg-emerald-50 rounded-xl p-3"><span class="text-emerald-700 text-xs">已取得</span><b id="priceOk" class="block text-lg mt-1">0</b></div>
+          <div class="bg-orange-50 rounded-xl p-3"><span class="text-orange-700 text-xs">缺漏</span><b id="priceMissing" class="block text-lg mt-1">0</b></div>
+        </div>
+        <div id="priceStatus" class="mt-3 text-xs text-slate-500">尚未抓取。</div>
+        <details class="mt-4">
+          <summary class="cursor-pointer text-sm font-bold text-slate-600">手動補價 / 覆寫（選用）</summary>
+          <p class="text-xs text-slate-400 mt-2">格式每行：日期,代號,收盤價。手動輸入會覆蓋自動抓到的價格。</p>
+          <textarea id="priceInput" class="mt-2 w-full h-32 border rounded-xl p-3 font-mono text-sm" placeholder="2026-01-05,3081,618&#10;2026-01-05,2360,856"></textarea>
+        </details>
       </div>
-      <button id="runBtn" class="w-full bg-orange-600 hover:bg-orange-700 text-white py-4 rounded-2xl font-black shadow-lg">執行雙模式回測</button>
+      <button id="runBtn" class="w-full bg-orange-600 hover:bg-orange-700 text-white py-4 rounded-2xl font-black shadow-lg">抓取價格並執行雙模式回測</button>
     </div>
 
     <div id="panel-result" class="panel hidden mt-5 space-y-5">
@@ -357,11 +372,42 @@ function updateReviewDone(){document.getElementById('reviewDone').textContent=Ob
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
 document.getElementById('parseBtn').onclick=()=>{
  S.messages=parseLine(S.raw);S.signals=S.messages.flatMap(classifyText);S.review=S.signals.filter(forceReview);S.decisions={};
- document.getElementById('kMsg').textContent=S.messages.length;document.getElementById('kSig').textContent=S.signals.filter(x=>x.action==='買入'||x.action==='賣出').length;document.getElementById('kReview').textContent=S.review.length;renderReview();showTab('review');lucide.createIcons();
+ document.getElementById('kMsg').textContent=S.messages.length;document.getElementById('kSig').textContent=S.signals.filter(x=>x.action==='買入'||x.action==='賣出').length;document.getElementById('kReview').textContent=S.review.length;renderReview();updatePriceStats(priceRequests());showTab('review');lucide.createIcons();
 };
 
-function parsePrices(){
+function parseManualPrices(){
  const m=new Map();document.getElementById('priceInput').value.split(/\r?\n/).forEach(l=>{const p=l.split(/[,\t]/).map(x=>x.trim());if(p.length>=3&&/^\d{4}$/.test(p[1])&&Number.isFinite(Number(p[2])))m.set(dateNorm(p[0])+'|'+p[1],Number(p[2]))});return m;
+}
+function priceRequests(){
+ const seen=new Set(),out=[];
+ validatedSignals().forEach(s=>{const key=s.date+'|'+s.code;if(!seen.has(key)){seen.add(key);out.push({date:s.date,code:s.code});}});
+ return out;
+}
+function updatePriceStats(requests){
+ const total=requests.length, ok=requests.filter(r=>S.prices.has(r.date+'|'+r.code)).length;
+ document.getElementById('priceNeed').textContent=total;
+ document.getElementById('priceOk').textContent=ok;
+ document.getElementById('priceMissing').textContent=total-ok;
+}
+async function fetchAutoPrices(){
+ const requests=priceRequests();
+ updatePriceStats(requests);
+ const status=document.getElementById('priceStatus');
+ if(!requests.length){status.textContent='沒有需要抓價的有效交易指令。';return;}
+ status.textContent='正在抓取歷史收盤價…';
+ const chunks=[];for(let i=0;i<requests.length;i+=100)chunks.push(requests.slice(i,i+100));
+ let done=0,miss=0;
+ for(const chunk of chunks){
+   const resp=await fetch('/api/close-prices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requests:chunk})});
+   if(!resp.ok){const j=await resp.json().catch(()=>({}));throw new Error(j.message||j.error||('抓價失敗 HTTP '+resp.status));}
+   const data=await resp.json();
+   (data.prices||[]).forEach(p=>{if(p.status==='OK'&&Number.isFinite(Number(p.close)))S.prices.set(p.date+'|'+p.code,Number(p.close));else miss++;});
+   done+=chunk.length;updatePriceStats(requests);status.textContent='已處理 '+done+' / '+requests.length+' 筆價格需求…';
+ }
+ const manual=parseManualPrices();manual.forEach((v,k)=>S.prices.set(k,v));
+ updatePriceStats(requests);
+ const finalMissing=requests.filter(r=>!S.prices.has(r.date+'|'+r.code)).length;
+ status.textContent='完成：已取得 '+(requests.length-finalMissing)+' 筆，缺漏 '+finalMissing+' 筆。手動補價可覆蓋自動結果。';
 }
 function validatedSignals(){return S.signals.map(s=>Object.assign({},s,S.decisions[s.id]||{})).filter(s=>s.action==='買入'||s.action==='賣出').sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time))}
 function buyQty(price,allocation){if(price<=0)return 0;const shares=Math.floor(allocation/price);return Math.max(1,shares)}
@@ -384,11 +430,20 @@ function simulate(signals,{infinite,capital,allocation,maxStocks}){
  }
  return{cash,realized,filled,skipped,rounds,pos};
 }
-document.getElementById('runBtn').onclick=()=>{
- S.prices=parsePrices();const cap=Number(document.getElementById('capitalInput').value),allocation=Number(document.getElementById('allocationInput').value),maxStocks=Number(document.getElementById('maxStocksInput').value);
- if(!Number.isFinite(cap)||cap<=0||!Number.isFinite(allocation)||allocation<=0||!Number.isFinite(maxStocks)||maxStocks<1){alert('請檢查本金／單檔配額／持股上限');return}
- const sig=validatedSignals();const finite=simulate(sig,{infinite:false,capital:cap,allocation,maxStocks});const infinite=simulate(sig,{infinite:true,capital:0,allocation,maxStocks:999});
- S.startingCapital=cap;S.results={finite,infinite};renderResults();showTab('result');
+document.getElementById('fetchPricesBtn').onclick=async()=>{
+ const b=document.getElementById('fetchPricesBtn');b.disabled=true;b.textContent='抓取中…';
+ try{S.prices=new Map();await fetchAutoPrices();}catch(e){document.getElementById('priceStatus').textContent='錯誤：'+e.message;}finally{b.disabled=false;b.textContent='自動抓收盤價';}
+};
+document.getElementById('runBtn').onclick=async()=>{
+ const b=document.getElementById('runBtn');b.disabled=true;b.textContent='抓價與回測中…';
+ try{
+   S.prices=new Map();await fetchAutoPrices();
+   const manual=parseManualPrices();manual.forEach((v,k)=>S.prices.set(k,v));
+   const cap=Number(document.getElementById('capitalInput').value),allocation=Number(document.getElementById('allocationInput').value),maxStocks=Number(document.getElementById('maxStocksInput').value);
+   if(!Number.isFinite(cap)||cap<=0||!Number.isFinite(allocation)||allocation<=0||!Number.isFinite(maxStocks)||maxStocks<1)throw new Error('請檢查本金／單檔配額／持股上限');
+   const sig=validatedSignals();const finite=simulate(sig,{infinite:false,capital:cap,allocation,maxStocks});const infinite=simulate(sig,{infinite:true,capital:0,allocation,maxStocks:999});
+   S.startingCapital=cap;S.results={finite,infinite};renderResults();showTab('result');
+ }catch(e){alert('回測失敗：'+e.message);}finally{b.disabled=false;b.textContent='抓取價格並執行雙模式回測';}
 };
 function roundStats(result,mode){
  const rounds=result.rounds||[];const wins=rounds.filter(r=>r.pnl>0).length;const invested=rounds.reduce((a,r)=>a+(r.buyCost||0),0);
