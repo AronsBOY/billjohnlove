@@ -16,6 +16,7 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
 .header-fun-pattern{background-color:#fbbf24;background-image:radial-gradient(circle at 10% 20%,rgba(255,255,255,.2) 0%,transparent 20%),radial-gradient(circle at 90% 80%,rgba(255,255,255,.2) 0%,transparent 20%)}
 .hide-scrollbar::-webkit-scrollbar{display:none}.hide-scrollbar{scrollbar-width:none}
 .review-selected{outline:3px solid #f59e0b;outline-offset:2px}
+.trade-input{min-width:82px;width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:6px 7px;background:#fff;font-size:12px}.trade-input:focus{outline:2px solid #f59e0b;outline-offset:1px}
 </style>
 </head>
 <body class="bg-kline-pattern min-h-screen text-slate-800">
@@ -205,6 +206,29 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
         <div id="monthCards" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 p-5"></div>
       </div>
 
+      <div class="bg-white rounded-2xl border-2 border-yellow-200 shadow-sm overflow-hidden">
+        <div class="p-5 border-b flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div>
+            <h3 class="font-black text-lg">每筆買賣明細</h3>
+            <p class="text-xs text-slate-500 mt-1">逐筆顯示時間、股票、成交價、股數、平均成本、本筆損益與交易後現金。按「編輯」可直接修正，儲存後會重新計算全部結算結果。</p>
+          </div>
+          <div class="flex flex-wrap gap-2 items-center" data-no-export="true">
+            <input id="tradeFilter" type="text" placeholder="搜尋代號 / 名稱" class="border rounded-xl px-3 py-2 text-sm w-40">
+            <button id="resetTradeEditsBtn" type="button" class="bg-slate-100 text-slate-600 px-3 py-2 rounded-xl font-bold text-xs">清除全部手動修改</button>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs min-w-[1180px]">
+            <thead class="bg-slate-50 sticky top-0"><tr>
+              <th class="p-3 text-left">日期</th><th class="p-3 text-left">時間</th><th class="p-3 text-left">股票</th><th class="p-3 text-center">動作</th>
+              <th class="p-3 text-right">買/賣價</th><th class="p-3 text-right">股數</th><th class="p-3 text-right">成本價</th>
+              <th class="p-3 text-right">交易金額</th><th class="p-3 text-right">本筆損益</th><th class="p-3 text-right">交易後庫存</th><th class="p-3 text-right">交易後現金</th><th class="p-3 text-center" data-no-export="true">操作</th>
+            </tr></thead>
+            <tbody id="tradeLedger"></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div class="p-5 border-b"><h3 class="font-black">個股結算｜完整操作輪次</h3><p class="text-xs text-slate-500">同一檔股票賣光後重新買入，會自動開始第 2 輪、第 3 輪。</p></div>
         <div class="overflow-x-auto">
@@ -238,7 +262,7 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
 </main>
 
 <script>
-const S={raw:'',sourceName:'',messages:[],signals:[],review:[],decisions:{},prices:new Map(),results:null,resultMode:'finite',startingCapital:5000000};
+const S={raw:'',sourceName:'',messages:[],signals:[],review:[],decisions:{},prices:new Map(),results:null,resultMode:'finite',startingCapital:5000000,tradeOverrides:{},editingTradeId:null,tradeFilter:''};
 const fmt=n=>'$'+Math.round(n||0).toLocaleString('zh-TW');
 const dateNorm=s=>String(s||'').replace(/\./g,'-').replace(/\//g,'-');
 function showTab(name){
@@ -436,23 +460,63 @@ async function fetchAutoPrices(){
 function validatedSignals(){return S.signals.map(s=>Object.assign({},s,S.decisions[s.id]||{})).filter(s=>s.action==='買入'||s.action==='賣出').sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time))}
 function buyQty(price,allocation){if(price<=0)return 0;const shares=Math.floor(allocation/price);return Math.max(1,shares)}
 function simulate(signals,{infinite,capital,allocation,maxStocks}){
- let cash=infinite?Infinity:capital,realized=0,filled=0,skipped=[];const pos={},rounds=[],active={};
- const ensure=c=>pos[c]||(pos[c]={qty:0,cost:0,name:''});
- for(const s of signals){const price=S.prices.get(s.date+'|'+s.code);if(!price){skipped.push({...s,reason:'缺少收盤價'});continue}const p=ensure(s.code);p.name=s.name||p.name;
+ let cash=infinite?Infinity:capital,realized=0,filled=0,skipped=[];const pos={},rounds=[],active={},ledger=[];
+ const ensure=code=>pos[code]||(pos[code]={qty:0,cost:0,name:''});
+ const ordered=signals.map(s=>Object.assign({},s,S.tradeOverrides[s.id]||{})).sort((a,b)=>((a.date||'')+' '+(a.time||'')).localeCompare((b.date||'')+' '+(b.time||'')));
+ for(const s of ordered){
+   const basePrice=S.prices.get(s.date+'|'+s.code);
+   const price=Number.isFinite(Number(s.price))&&Number(s.price)>0?Number(s.price):basePrice;
+   if(!price){skipped.push({...s,reason:'缺少收盤價'});continue}
+   const p=ensure(s.code);p.name=s.name||p.name;
    if(s.action==='買入'){
-     const newStock=p.qty<=0;if(!infinite&&newStock&&Object.values(pos).filter(x=>x.qty>0).length>=maxStocks){skipped.push({...s,reason:'已達同時持股上限'});continue}
-     let qty=infinite?1000:buyQty(price,allocation);let amt=qty*price;
-     if(!infinite&&amt>cash){qty=Math.floor(cash/price);amt=qty*price}
+     const newStock=p.qty<=0;
+     if(!infinite&&newStock&&Object.values(pos).filter(x=>x.qty>0).length>=maxStocks){skipped.push({...s,reason:'已達同時持股上限'});continue}
+     const avgBefore=p.qty>0?p.cost/p.qty:0;
+     let qty=Number.isFinite(Number(s.qty))&&Number(s.qty)>0?Math.floor(Number(s.qty)):(infinite?1000:buyQty(price,allocation));
+     let amt=qty*price;
+     if(!infinite&&amt>cash&&!(Number.isFinite(Number(s.qty))&&Number(s.qty)>0)){qty=Math.floor(cash/price);amt=qty*price}
      if(qty<=0||(!infinite&&amt>cash)){skipped.push({...s,reason:'資金不足'});continue}
      if(!active[s.code])active[s.code]={code:s.code,name:s.name,start:s.date,buyCost:0,sellProceeds:0,buyQty:0,sellQty:0};
-     p.cost+=amt;p.qty+=qty;active[s.code].buyCost+=amt;active[s.code].buyQty+=qty;if(!infinite)cash-=amt;filled++;continue;
+     p.cost+=amt;p.qty+=qty;
+     const avgAfter=p.qty?p.cost/p.qty:0;
+     active[s.code].buyCost+=amt;active[s.code].buyQty+=qty;
+     if(!infinite)cash-=amt;filled++;
+     ledger.push({signalId:s.id,date:s.date,time:s.time||'',code:s.code,name:s.name||p.name,action:'買入',price,qty,costPrice:avgAfter,avgCostBefore:avgBefore,avgCostAfter:avgAfter,amount:amt,realizedPnl:0,positionAfter:p.qty,cashAfter:infinite?null:cash,raw:s.raw||'',manual:!!S.tradeOverrides[s.id]});
+     continue;
    }
    if(p.qty<=0){skipped.push({...s,reason:'無持股可賣'});continue}
-   const qty=s.qtyRule==='half'?Math.max(1,Math.floor(p.qty/2)):p.qty;const avg=p.cost/p.qty;const proceeds=qty*price;realized+=(price-avg)*qty;p.cost-=avg*qty;p.qty-=qty;if(!infinite)cash+=proceeds;filled++;
+   const systemAvg=p.cost/p.qty;
+   const basis=Number.isFinite(Number(s.costPrice))&&Number(s.costPrice)>=0?Number(s.costPrice):systemAvg;
+   let qty=Number.isFinite(Number(s.qty))&&Number(s.qty)>0?Math.floor(Number(s.qty)):(s.qtyRule==='half'?Math.max(1,Math.floor(p.qty/2)):p.qty);
+   qty=Math.min(qty,p.qty);
+   if(qty<=0){skipped.push({...s,reason:'賣出股數為 0'});continue}
+   const proceeds=qty*price,pnl=(price-basis)*qty;
+   realized+=pnl;
+   const remaining=p.qty-qty;
+   if(Number.isFinite(Number(s.costPrice))&&Number(s.costPrice)>=0)p.cost=Math.max(0,remaining*basis);
+   else p.cost=Math.max(0,p.cost-systemAvg*qty);
+   p.qty=remaining;
+   if(!infinite)cash+=proceeds;filled++;
    if(active[s.code]){active[s.code].sellProceeds+=proceeds;active[s.code].sellQty+=qty}
-   if(p.qty<=0){p.qty=0;p.cost=0;if(active[s.code]){const r=active[s.code];const pnl=r.sellProceeds-r.buyCost;rounds.push({...r,end:s.date,pnl,pct:r.buyCost?pnl/r.buyCost*100:0});delete active[s.code]}}
+   ledger.push({signalId:s.id,date:s.date,time:s.time||'',code:s.code,name:s.name||p.name,action:'賣出',price,qty,costPrice:basis,avgCostBefore:basis,avgCostAfter:p.qty?p.cost/p.qty:0,amount:proceeds,realizedPnl:pnl,positionAfter:p.qty,cashAfter:infinite?null:cash,raw:s.raw||'',manual:!!S.tradeOverrides[s.id]});
+   if(p.qty<=0){
+     p.qty=0;p.cost=0;
+     if(active[s.code]){const r=active[s.code];const roundPnl=r.sellProceeds-r.buyCost;rounds.push({...r,end:s.date,pnl:roundPnl,pct:r.buyCost?roundPnl/r.buyCost*100:0});delete active[s.code]}
+   }
  }
- return{cash,realized,filled,skipped,rounds,pos};
+ return{cash,realized,filled,skipped,rounds,pos,ledger};
+}
+function rerunWithTradeOverrides(){
+ if(!S.results||!S.signals.length)return false;
+ const cap=Number(document.getElementById('capitalInput').value)||S.startingCapital;
+ const allocation=Number(document.getElementById('allocationInput').value)||1000000;
+ const maxStocks=Number(document.getElementById('maxStocksInput').value)||5;
+ const sig=validatedSignals();
+ S.results={
+   finite:simulate(sig,{infinite:false,capital:cap,allocation,maxStocks}),
+   infinite:simulate(sig,{infinite:true,capital:0,allocation,maxStocks:999})
+ };
+ S.startingCapital=cap;renderResults();saveLatestSnapshot();return true;
 }
 document.getElementById('fetchPricesBtn').onclick=async()=>{
  const b=document.getElementById('fetchPricesBtn');b.disabled=true;b.textContent='抓取中…';
@@ -486,6 +550,69 @@ function renderReviewHistory(){
  return '<div class="p-4 text-sm"><div class="flex justify-between gap-3"><b>'+r.date+' '+r.code+' '+r.name+'</b><span class="text-xs font-black '+(finalAction==='忽略'?'text-slate-500':changed?'text-blue-600':'text-emerald-600')+'">'+(finalAction==='忽略'?'已排除':changed?'已修改':'確認正確')+'</span></div><div class="text-xs text-slate-500 mt-1">原判定：'+r.action+(r.qtyRule?' / '+r.qtyRule:'')+' → 最終：'+finalAction+(finalQty?' / '+finalQty:'')+'</div><div class="text-xs text-slate-400 mt-1">'+escapeHtml(r.raw)+'</div></div>';
  }).join('')||'<div class="p-6 text-center text-slate-400">尚無人工覆核紀錄</div>';
 }
+
+function tradeNumber(v,d=2){const n=Number(v);return Number.isFinite(n)?n.toLocaleString('zh-TW',{minimumFractionDigits:0,maximumFractionDigits:d}):'-'}
+function renderTradeLedger(result){
+ const box=document.getElementById('tradeLedger');if(!box)return;
+ const q=(S.tradeFilter||'').trim().toLowerCase();
+ const rows=(result.ledger||[]).filter(r=>!q||String(r.code).includes(q)||String(r.name||'').toLowerCase().includes(q));
+ box.innerHTML=rows.map(r=>{
+   if(S.editingTradeId===r.signalId){
+     return '<tr class="border-t bg-yellow-50" data-trade-row="'+escapeHtml(r.signalId)+'">'+
+       '<td class="p-2"><input data-f="date" type="date" class="trade-input" value="'+escapeHtml(r.date)+'"></td>'+
+       '<td class="p-2"><input data-f="time" type="time" class="trade-input" value="'+escapeHtml(r.time||'09:00')+'"></td>'+
+       '<td class="p-2"><div class="grid grid-cols-2 gap-1"><input data-f="code" class="trade-input" value="'+escapeHtml(r.code)+'"><input data-f="name" class="trade-input" value="'+escapeHtml(r.name||'')+'"></div></td>'+
+       '<td class="p-2"><select data-f="action" class="trade-input"><option '+(r.action==='買入'?'selected':'')+'>買入</option><option '+(r.action==='賣出'?'selected':'')+'>賣出</option></select></td>'+
+       '<td class="p-2"><input data-f="price" type="number" min="0.01" step="0.01" class="trade-input text-right" value="'+r.price+'"></td>'+
+       '<td class="p-2"><input data-f="qty" type="number" min="1" step="1" class="trade-input text-right" value="'+r.qty+'"></td>'+
+       '<td class="p-2"><input data-f="costPrice" type="number" min="0" step="0.01" class="trade-input text-right" value="'+Number(r.costPrice||0).toFixed(2)+'"></td>'+
+       '<td class="p-2 text-right text-slate-400">'+fmt(r.amount)+'</td>'+
+       '<td class="p-2 text-right">'+(r.action==='賣出'?fmt(r.realizedPnl):'-')+'</td>'+
+       '<td class="p-2 text-right">'+tradeNumber(r.positionAfter,0)+'</td>'+
+       '<td class="p-2 text-right">'+(r.cashAfter==null?'—':fmt(r.cashAfter))+'</td>'+
+       '<td class="p-2"><div class="flex gap-1 justify-center"><button type="button" data-save-trade="'+escapeHtml(r.signalId)+'" class="bg-orange-600 text-white rounded-lg px-2 py-1.5 font-bold">儲存</button><button type="button" data-cancel-trade class="bg-slate-200 rounded-lg px-2 py-1.5 font-bold">取消</button></div></td></tr>';
+   }
+   return '<tr class="border-t '+(r.manual?'bg-yellow-50':'')+'" title="'+escapeHtml(r.raw||'')+'">'+
+     '<td class="p-3 whitespace-nowrap">'+escapeHtml(r.date)+'</td><td class="p-3 whitespace-nowrap">'+escapeHtml(r.time||'')+'</td>'+
+     '<td class="p-3"><b>'+escapeHtml(r.code)+'</b><div class="text-slate-400">'+escapeHtml(r.name||'')+'</div></td>'+
+     '<td class="p-3 text-center"><span class="px-2 py-1 rounded-full font-black '+(r.action==='買入'?'bg-red-100 text-red-700':'bg-emerald-100 text-emerald-700')+'">'+r.action+'</span></td>'+
+     '<td class="p-3 text-right font-mono font-bold">'+tradeNumber(r.price)+'</td>'+
+     '<td class="p-3 text-right font-mono">'+tradeNumber(r.qty,0)+'</td>'+
+     '<td class="p-3 text-right font-mono">'+tradeNumber(r.costPrice)+'</td>'+
+     '<td class="p-3 text-right font-mono">'+fmt(r.amount)+'</td>'+
+     '<td class="p-3 text-right font-mono font-black '+(r.realizedPnl>0?'text-red-600':r.realizedPnl<0?'text-green-600':'text-slate-400')+'">'+(r.action==='賣出'?fmt(r.realizedPnl):'—')+'</td>'+
+     '<td class="p-3 text-right font-mono">'+tradeNumber(r.positionAfter,0)+'</td>'+
+     '<td class="p-3 text-right font-mono">'+(r.cashAfter==null?'—':fmt(r.cashAfter))+'</td>'+
+     '<td class="p-3 text-center" data-no-export="true"><button type="button" data-edit-trade="'+escapeHtml(r.signalId)+'" class="bg-yellow-100 text-yellow-800 px-3 py-1.5 rounded-lg font-black">編輯</button>'+(r.manual?' <button type="button" data-reset-trade="'+escapeHtml(r.signalId)+'" class="bg-slate-100 text-slate-500 px-2 py-1.5 rounded-lg font-bold">復原</button>':'')+'</td></tr>';
+ }).join('')||'<tr><td colspan="12" class="p-8 text-center text-slate-400">沒有符合條件的成交明細</td></tr>';
+ box.querySelectorAll('[data-edit-trade]').forEach(b=>b.addEventListener('click',()=>{S.editingTradeId=b.dataset.editTrade;renderTradeLedger(result)}));
+ box.querySelectorAll('[data-cancel-trade]').forEach(b=>b.addEventListener('click',()=>{S.editingTradeId=null;renderTradeLedger(result)}));
+ box.querySelectorAll('[data-reset-trade]').forEach(b=>b.addEventListener('click',()=>{delete S.tradeOverrides[b.dataset.resetTrade];S.editingTradeId=null;rerunWithTradeOverrides()}));
+ box.querySelectorAll('[data-save-trade]').forEach(b=>b.addEventListener('click',()=>saveTradeRow(b.dataset.saveTrade)));
+}
+function saveTradeRow(id){
+ const row=document.querySelector('[data-trade-row="'+CSS.escape(id)+'"]');if(!row)return;
+ const val=f=>row.querySelector('[data-f="'+f+'"]').value.trim();
+ const date=val('date'),time=val('time'),code=val('code'),name=val('name'),action=val('action');
+ const price=Number(val('price')),qty=Math.floor(Number(val('qty'))),costPrice=Number(val('costPrice'));
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){alert('日期格式不正確');return}
+ if(!/^\d{2}:\d{2}$/.test(time)){alert('時間格式不正確');return}
+ if(!/^\d{4}$/.test(code)){alert('股票代號請輸入 4 碼');return}
+ if(!Number.isFinite(price)||price<=0){alert('成交價必須大於 0');return}
+ if(!Number.isFinite(qty)||qty<=0){alert('股數必須大於 0');return}
+ if(action==='賣出'&&(!Number.isFinite(costPrice)||costPrice<0)){alert('賣出成本價不可小於 0');return}
+ S.tradeOverrides[id]={date,time,code,name,action,price,qty};
+ if(action==='賣出')S.tradeOverrides[id].costPrice=costPrice;
+ S.editingTradeId=null;
+ rerunWithTradeOverrides();
+ document.getElementById('exportStatus').textContent='交易明細已手動修正，所有損益已重新計算。';
+}
+function resetAllTradeEdits(){
+ if(!Object.keys(S.tradeOverrides).length)return;
+ if(!confirm('清除所有手動交易修改並恢復系統回測值？'))return;
+ S.tradeOverrides={};S.editingTradeId=null;rerunWithTradeOverrides();
+ document.getElementById('exportStatus').textContent='已清除全部手動交易修改。';
+}
 function renderSettlementMode(){
  if(!S.results)return;const mode=S.resultMode;const result=S.results[mode];const st=roundStats(result,mode);
  document.querySelectorAll('.result-mode').forEach(b=>{const on=b.dataset.resultMode===mode;b.className='result-mode px-3 py-2 rounded-lg text-xs font-black '+(on?'bg-orange-600 text-white':'text-slate-500')});
@@ -501,6 +628,7 @@ function renderSettlementMode(){
  const roundCount={};
  document.getElementById('roundTable').innerHTML=(result.rounds||[]).slice().sort((a,b)=>(a.end||'').localeCompare(b.end||'')).map(r=>{roundCount[r.code]=(roundCount[r.code]||0)+1;return '<tr class="border-t"><td class="p-3 font-bold">'+r.code+' '+r.name+'</td><td class="p-3 text-center">第 '+roundCount[r.code]+' 輪</td><td class="p-3">'+r.start+'</td><td class="p-3">'+r.end+'</td><td class="p-3 text-right">'+fmt(r.buyCost)+'</td><td class="p-3 text-right font-black '+(r.pnl>=0?'text-red-600':'text-green-600')+'">'+fmt(r.pnl)+'</td><td class="p-3 text-right">'+(r.pct>=0?'+':'')+r.pct.toFixed(2)+'%</td></tr>'}).join('')||'<tr><td colspan="7" class="p-6 text-center text-slate-400">尚無完整結算輪次</td></tr>';
  const skips=result.skipped||[];document.getElementById('skipList').innerHTML=skips.slice(0,120).map(s=>'<div class="p-4 text-sm flex justify-between gap-3"><div><b>'+s.date+' '+s.code+' '+s.name+'</b><div class="text-xs text-slate-400 mt-1">'+escapeHtml(s.raw)+'</div></div><span class="text-xs font-bold text-orange-600 shrink-0">'+s.reason+'</span></div>').join('')||'<div class="p-6 text-center text-slate-400">沒有未成交指令</div>';
+ renderTradeLedger(result);
  const opens=openRows(result);document.getElementById('openPositions').innerHTML=opens.map(p=>'<div class="bg-slate-800 rounded-xl p-4 border border-slate-700"><div class="flex justify-between gap-2"><div><div class="font-black">'+p.code+' '+p.name+'</div><div class="text-xs text-slate-400 mt-1">尚未賣光，因此不計入已結算</div></div><span class="text-yellow-300 font-black">'+p.qty.toLocaleString('zh-TW')+' 股</span></div><div class="grid grid-cols-2 gap-3 mt-3 text-xs"><div><span class="text-slate-400">平均成本</span><b class="block text-white mt-1">'+p.avg.toFixed(2)+'</b></div><div><span class="text-slate-400">占用成本</span><b class="block text-white mt-1">'+fmt(p.cost)+'</b></div></div></div>').join('')||'<div class="col-span-full text-center text-slate-400 py-6">期末沒有未結算部位</div>';
 }
 function renderResults(){
@@ -544,7 +672,10 @@ function snapshotData(label){
      reviewed:Object.keys(S.decisions).length,
      prices:S.prices.size
    },
-   results:S.results
+   results:S.results,
+   tradeOverrides:S.tradeOverrides,
+   signals:S.signals,
+   prices:Array.from(S.prices.entries())
  };
 }
 function saveLatestSnapshot(){
@@ -569,6 +700,9 @@ function loadSnapshot(snap){
  S.startingCapital=Number(snap.startingCapital)||5000000;
  S.resultMode=snap.resultMode||'finite';
  S.sourceName=snap.sourceName||'';
+ S.tradeOverrides=snap.tradeOverrides||{};
+ if(Array.isArray(snap.signals))S.signals=snap.signals;
+ if(Array.isArray(snap.prices))S.prices=new Map(snap.prices);
  document.getElementById('capitalInput').value=S.startingCapital;
  if(snap.settings){
    if(snap.settings.allocation)document.getElementById('allocationInput').value=snap.settings.allocation;
@@ -620,6 +754,9 @@ function currentReportText(){
  const count={};
  (result.rounds||[]).forEach(r=>{count[r.code]=(count[r.code]||0)+1;lines.push(r.code+' '+r.name+'｜第'+count[r.code]+'輪｜'+r.start+' → '+r.end+'｜成本 '+fmt(r.buyCost)+'｜損益 '+fmt(r.pnl)+'｜'+r.pct.toFixed(2)+'%')});
  lines.push('');
+ lines.push('【每筆買賣明細】');
+ (result.ledger||[]).forEach(r=>lines.push(r.date+' '+(r.time||'')+'｜'+r.code+' '+r.name+'｜'+r.action+'｜成交 '+Number(r.price).toFixed(2)+'｜'+r.qty+'股｜成本 '+Number(r.costPrice||0).toFixed(2)+'｜金額 '+fmt(r.amount)+'｜損益 '+(r.action==='賣出'?fmt(r.realizedPnl):'-')));
+ lines.push('');
  lines.push('【期末未結算部位】');
  if(!opens.length)lines.push('無');
  opens.forEach(p=>lines.push(p.code+' '+p.name+'｜'+p.qty+'股｜均價 '+p.avg.toFixed(2)+'｜占用成本 '+fmt(p.cost)));
@@ -667,6 +804,8 @@ function exportTxt(){
  downloadBlob(new Blob([text],{type:'text/plain;charset=utf-8'}),'billjohn_backtest_'+fileStamp()+'.txt');
  document.getElementById('exportStatus').textContent='TXT 已產生。';
 }
+document.getElementById('tradeFilter').addEventListener('input',e=>{S.tradeFilter=e.target.value||'';if(S.results)renderTradeLedger(S.results[S.resultMode])});
+document.getElementById('resetTradeEditsBtn').addEventListener('click',resetAllTradeEdits);
 document.getElementById('saveResultBtn').addEventListener('click',savePermanentSnapshot);
 document.getElementById('exportPngBtn').addEventListener('click',exportPng);
 document.getElementById('exportPdfBtn').addEventListener('click',exportPdf);
