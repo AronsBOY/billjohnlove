@@ -60,6 +60,27 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
         <p class="text-sm text-slate-500 mt-1">只抓「[葉宇乘-進階組:]」區塊。群友聊天、Bot 回覆、你自己的持股與結算訊息全部排除。</p>
         <input id="fileInput" type="file" accept=".txt,text/plain" class="mt-4 block w-full text-sm file:mr-4 file:rounded-xl file:border-0 file:bg-orange-600 file:px-4 file:py-3 file:font-bold file:text-white hover:file:bg-orange-700">
       </div>
+
+      <div class="bg-white rounded-2xl p-5 border-2 border-orange-200 shadow-sm">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <div class="flex items-center gap-2 font-black text-lg"><i data-lucide="file-plus-2"></i> 補充遺漏文字指令</div>
+            <p class="text-sm text-slate-500 mt-1">原始 LINE 有老師指令但系統漏抓時，可把日期與原文補進來。系統會利用整份 LINE 建立「股票名稱 ↔ 代號」字典，連原文沒寫代號的股票也會嘗試補出。</p>
+          </div>
+          <span class="text-xs bg-orange-100 text-orange-700 font-black px-3 py-1 rounded-full">人工補單</span>
+        </div>
+        <div class="grid md:grid-cols-[170px_140px_1fr] gap-3 mt-4">
+          <div><label class="text-xs text-slate-500 font-bold">日期</label><input id="supplementDate" type="date" class="mt-1 w-full border rounded-xl px-3 py-2.5"></div>
+          <div><label class="text-xs text-slate-500 font-bold">時間</label><input id="supplementTime" type="time" value="09:00" class="mt-1 w-full border rounded-xl px-3 py-2.5"></div>
+          <div><label class="text-xs text-slate-500 font-bold">老師原始文字</label><textarea id="supplementText" class="mt-1 w-full min-h-[110px] border rounded-xl p-3 text-sm" placeholder="例如：台股下殺第二天...國精化(4722)、南茂都到風控位置了，今天停損出場..."></textarea></div>
+        </div>
+        <div class="flex flex-wrap gap-2 mt-3">
+          <button id="analyzeSupplementBtn" type="button" class="bg-slate-900 text-yellow-300 px-4 py-2.5 rounded-xl font-black text-sm">解析補充文字</button>
+          <button id="addSupplementBtn" type="button" class="bg-orange-600 text-white px-4 py-2.5 rounded-xl font-black text-sm disabled:opacity-40" disabled>加入回測指令</button>
+        </div>
+        <div id="supplementPreview" class="mt-4"></div>
+        <div id="supplementHistory" class="mt-4"></div>
+      </div>
       <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
         <div class="flex justify-between gap-3 items-center"><div><h3 class="font-black">辨識規則</h3><p class="text-xs text-slate-400">第一版採規則引擎；曖昧案例全部送人工覆核。</p></div><span class="text-xs bg-yellow-100 text-yellow-800 font-bold px-3 py-1 rounded-full">不寫入正式 Bot</span></div>
         <div class="grid md:grid-cols-2 gap-3 mt-4 text-sm">
@@ -262,7 +283,7 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
 </main>
 
 <script>
-const S={raw:'',sourceName:'',messages:[],signals:[],review:[],reviewConfirmed:{},decisions:{},prices:new Map(),results:null,resultMode:'finite',startingCapital:5000000,tradeOverrides:{},editingTradeId:null,tradeFilter:''};
+const S={raw:'',sourceName:'',messages:[],signals:[],review:[],reviewConfirmed:{},decisions:{},prices:new Map(),results:null,resultMode:'finite',startingCapital:5000000,tradeOverrides:{},editingTradeId:null,tradeFilter:'',supplementDraft:[],manualSupplements:[]};
 const fmt=n=>'$'+Math.round(n||0).toLocaleString('zh-TW');
 const dateNorm=s=>String(s||'').replace(/\./g,'-').replace(/\//g,'-');
 function showTab(name){
@@ -353,6 +374,128 @@ function extractStocks(sentence){
  const re=/([^\s，。；：:、]{1,18})\s*[（(](\d{4})[）)]/g;let m,arr=[];
  while((m=re.exec(sentence)))arr.push({code:m[2],name:cleanStockName(m[1]),index:m.index,full:m[0]});
  return arr;
+}
+
+function buildStockDictionary(){
+ const dict=new Map();
+ const feed=text=>{
+   const re=/([^\s，。；：:、]{1,18})\s*[（(](\d{4})[）)]/g;let m;
+   while((m=re.exec(String(text||'')))){
+     const name=cleanStockName(m[1]);
+     if(name&&/^\d{4}$/.test(m[2]))dict.set(name,m[2]);
+   }
+ };
+ feed(S.raw);
+ S.signals.forEach(s=>{const n=cleanStockName(s.name);if(n&&/^\d{4}$/.test(s.code))dict.set(n,s.code)});
+ return dict;
+}
+function supplementWholeAction(text){
+ if(RX.half.test(text))return {action:'賣出',qtyRule:'half',reason:'補充文字：明確賣一半'};
+ if(RX.sell.test(text)||/風控位置.*停損出場|停損出場/.test(text))return {action:'賣出',qtyRule:'all',reason:'補充文字：明確賣出/停損'};
+ if(RX.buyHalf.test(text))return {action:'買入',qtyRule:'half_buy',reason:'補充文字：明確買入一半'};
+ if(RX.buy.test(text))return {action:'買入',qtyRule:'one_lot',reason:'補充文字：明確買入'};
+ return {action:'忽略',qtyRule:'',reason:'補充文字：動作不明'};
+}
+function analyzeSupplement(){
+ const date=document.getElementById('supplementDate').value;
+ const time=document.getElementById('supplementTime').value||'09:00';
+ const raw=document.getElementById('supplementText').value.trim();
+ if(!date||!raw){alert('請先填日期與老師原始文字');return}
+ const dict=buildStockDictionary(),stocks=extractStocks(raw),seenCodes=new Set(stocks.map(x=>x.code));
+ // 從已匯入的 LINE 歷史建立名稱字典，補出「南茂」這種原文未附代號的股票。
+ Array.from(dict.entries()).sort((a,b)=>b[0].length-a[0].length).forEach(([name,code])=>{
+   if(seenCodes.has(code))return;
+   if(name.length>=2 && raw.includes(name)){stocks.push({code,name,index:raw.indexOf(name),full:name,inferred:true});seenCodes.add(code)}
+ });
+ const whole=supplementWholeAction(raw);
+ const rows=stocks.map((st,i)=>{
+   const parsed=st.inferred?whole:classifyStock(raw,st,stocks.length);
+   let action=parsed.action,qtyRule=parsed.qtyRule,reason=parsed.reason;
+   // 多股票共用同一個「停損出場/獲利了結」時，讓整句明確動作套到每一檔。
+   if((action==='忽略'||parsed.confidence<.5)&&whole.action!=='忽略'){action=whole.action;qtyRule=whole.qtyRule;reason=whole.reason}
+   return {draftId:'supp-'+Date.now()+'-'+i,date,time,code:st.code,name:cleanStockName(st.name),action,qtyRule,raw,reason:reason+(st.inferred?'、代號由 LINE 歷史名稱字典推定':'')};
+ });
+ S.supplementDraft=rows;
+ renderSupplementPreview();
+}
+function supplementActionValue(r){
+ if(r.action==='賣出')return r.qtyRule==='half'?'sell_half':'sell_all';
+ if(r.action==='買入')return r.qtyRule==='half_buy'?'buy_half':'buy';
+ return 'ignore';
+}
+function renderSupplementPreview(){
+ const box=document.getElementById('supplementPreview');
+ const rows=S.supplementDraft||[];
+ if(!rows.length){box.innerHTML='<div class="text-xs text-slate-400">尚未解析補充文字。</div>';document.getElementById('addSupplementBtn').disabled=true;return}
+ box.innerHTML='<div class="font-black text-sm mb-2">解析結果｜請確認每一檔</div><div class="space-y-2">'+rows.map((r,i)=>
+   '<div class="grid grid-cols-1 md:grid-cols-[120px_1fr_220px] gap-2 items-center border rounded-xl p-3 bg-orange-50">'+
+   '<input data-supp-code="'+i+'" class="border rounded-lg px-2 py-2 font-mono font-bold" value="'+escapeHtml(r.code)+'">'+
+   '<input data-supp-name="'+i+'" class="border rounded-lg px-2 py-2 font-bold" value="'+escapeHtml(r.name||'')+'">'+
+   '<select data-supp-action="'+i+'" class="border rounded-lg px-2 py-2 font-bold">'+
+     '<option value="ignore" '+(supplementActionValue(r)==='ignore'?'selected':'')+'>不交易 / 忽略</option>'+
+     '<option value="buy" '+(supplementActionValue(r)==='buy'?'selected':'')+'>買入</option>'+
+     '<option value="buy_half" '+(supplementActionValue(r)==='buy_half'?'selected':'')+'>買入一半</option>'+
+     '<option value="sell_half" '+(supplementActionValue(r)==='sell_half'?'selected':'')+'>賣一半</option>'+
+     '<option value="sell_all" '+(supplementActionValue(r)==='sell_all'?'selected':'')+'>賣光</option>'+
+   '</select><div class="md:col-span-3 text-[11px] text-slate-500">'+escapeHtml(r.reason||'')+'</div></div>'
+ ).join('')+'</div>';
+ document.getElementById('addSupplementBtn').disabled=false;
+}
+function syncSupplementDraftFromUI(){
+ (S.supplementDraft||[]).forEach((r,i)=>{
+   const code=document.querySelector('[data-supp-code="'+i+'"]');
+   const name=document.querySelector('[data-supp-name="'+i+'"]');
+   const act=document.querySelector('[data-supp-action="'+i+'"]');
+   if(code)r.code=code.value.trim();
+   if(name)r.name=cleanStockName(name.value.trim());
+   if(act){
+     const v=act.value;
+     r.action=v==='buy'||v==='buy_half'?'買入':v==='sell_all'||v==='sell_half'?'賣出':'忽略';
+     r.qtyRule=v==='buy_half'?'half_buy':v==='buy'?'one_lot':v==='sell_half'?'half':v==='sell_all'?'all':'';
+   }
+ });
+}
+async function addSupplementSignals(){
+ syncSupplementDraftFromUI();
+ const usable=(S.supplementDraft||[]).filter(r=>/^\d{4}$/.test(r.code)&&(r.action==='買入'||r.action==='賣出'));
+ if(!usable.length){alert('沒有可加入的交易指令，請確認股票代號與動作');return}
+ const stamp=Date.now();
+ usable.forEach((r,i)=>{
+   const signal={
+     id:'manual-'+stamp+'-'+i+'-'+r.code,sourceId:'manual-'+stamp,sourceRaw:r.raw,
+     date:r.date,time:r.time,code:r.code,name:cleanStockName(r.name),action:r.action,qtyRule:r.qtyRule,
+     condition:'always',suggested:'',raw:r.raw,reason:'人工補充遺漏文字指令',confidence:1,manualSupplement:true
+   };
+   S.signals.push(signal);
+   S.manualSupplements.push({...signal});
+ });
+ S.signals.sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
+ S.supplementDraft=[];
+ renderSupplementPreview();renderSupplementHistory();
+ document.getElementById('kSig').textContent=S.signals.filter(x=>x.action==='買入'||x.action==='賣出').length;
+ updatePriceStats(priceRequests());
+ if(S.results){
+   try{await fetchAutoPrices();}catch(e){}
+   rerunWithTradeOverrides();
+ }
+ document.getElementById('supplementText').value='';
+}
+function removeSupplement(id){
+ S.manualSupplements=S.manualSupplements.filter(x=>x.id!==id);
+ S.signals=S.signals.filter(x=>x.id!==id);
+ delete S.decisions[id];delete S.tradeOverrides[id];
+ renderSupplementHistory();
+ document.getElementById('kSig').textContent=S.signals.filter(x=>x.action==='買入'||x.action==='賣出').length;
+ updatePriceStats(priceRequests());
+ if(S.results)rerunWithTradeOverrides();
+}
+function renderSupplementHistory(){
+ const box=document.getElementById('supplementHistory');if(!box)return;
+ const list=S.manualSupplements||[];
+ box.innerHTML=list.length?'<details open><summary class="cursor-pointer font-black text-sm">已補充 '+list.length+' 筆</summary><div class="mt-2 space-y-2">'+list.map(x=>
+   '<div class="flex flex-col md:flex-row md:items-center justify-between gap-2 border rounded-xl p-3 bg-white"><div><b>'+escapeHtml(x.date)+' '+escapeHtml(x.code)+' '+escapeHtml(cleanStockName(x.name))+'｜'+escapeHtml(x.action)+(x.qtyRule==='half'?'一半':x.qtyRule==='all'?'賣光':x.qtyRule==='half_buy'?'一半':'')+'</b><div class="text-xs text-slate-400 mt-1">'+escapeHtml(x.raw)+'</div></div><button type="button" data-del-supp="'+escapeHtml(x.id)+'" class="shrink-0 bg-slate-100 text-slate-600 px-3 py-2 rounded-lg text-xs font-bold">移除</button></div>'
+ ).join('')+'</div></details>':'';
+ box.querySelectorAll('[data-del-supp]').forEach(b=>b.addEventListener('click',()=>{if(confirm('移除這筆人工補充指令？'))removeSupplement(b.dataset.delSupp)}));
 }
 function inferCondition(sentence){
  if(/沒加碼過第二次|沒有加碼過第二次/.test(sentence))return 'if_add_count_lt_2';
@@ -512,9 +655,14 @@ function updateReviewDone(){
 }
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
 document.getElementById('parseBtn').onclick=()=>{
- S.messages=parseLine(S.raw);S.signals=S.messages.flatMap(classifyText);S.review=buildReviewGroups(S.signals);S.decisions={};S.reviewConfirmed={};
+ S.messages=parseLine(S.raw);const parsed=S.messages.flatMap(classifyText);S.signals=parsed.concat(S.manualSupplements||[]).sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));S.review=buildReviewGroups(parsed);S.decisions={};S.reviewConfirmed={};
  document.getElementById('kMsg').textContent=S.messages.length;document.getElementById('kSig').textContent=S.signals.filter(x=>x.action==='買入'||x.action==='賣出').length;document.getElementById('kReview').textContent=S.review.length;renderReview();updatePriceStats(priceRequests());showTab('review');lucide.createIcons();
 };
+
+
+document.getElementById('analyzeSupplementBtn').addEventListener('click',analyzeSupplement);
+document.getElementById('addSupplementBtn').addEventListener('click',addSupplementSignals);
+renderSupplementPreview();renderSupplementHistory();
 
 function parseManualPrices(){
  const m=new Map();document.getElementById('priceInput').value.split(/\r?\n/).forEach(l=>{const p=l.split(/[,\t]/).map(x=>x.trim());if(p.length>=3&&/^\d{4}$/.test(p[1])&&Number.isFinite(Number(p[2])))m.set(dateNorm(p[0])+'|'+p[1],Number(p[2]))});return m;
@@ -853,6 +1001,7 @@ function snapshotData(label){
    results:S.results,
    tradeOverrides:S.tradeOverrides,
    reviewConfirmed:S.reviewConfirmed,
+   manualSupplements:S.manualSupplements,
    signals:S.signals,
    prices:Array.from(S.prices.entries())
  };
@@ -881,7 +1030,9 @@ function loadSnapshot(snap){
  S.sourceName=snap.sourceName||'';
  S.tradeOverrides=snap.tradeOverrides||{};
  S.reviewConfirmed=snap.reviewConfirmed||{};
- if(Array.isArray(snap.signals)){S.signals=snap.signals;S.review=buildReviewGroups(S.signals);}
+ S.manualSupplements=snap.manualSupplements||[];
+ if(Array.isArray(snap.signals)){S.signals=snap.signals;S.review=buildReviewGroups(S.signals.filter(x=>!x.manualSupplement));}
+ renderSupplementHistory();
  if(Array.isArray(snap.prices))S.prices=new Map(snap.prices);
  document.getElementById('capitalInput').value=S.startingCapital;
  if(snap.settings){
@@ -933,6 +1084,10 @@ function currentReportText(){
  lines.push('【個股完整操作輪次】');
  const count={};
  (result.rounds||[]).forEach(r=>{count[r.code]=(count[r.code]||0)+1;lines.push(r.code+' '+r.name+'｜第'+count[r.code]+'輪｜'+r.start+' → '+r.end+'｜成本 '+fmt(r.buyCost)+'｜損益 '+fmt(r.pnl)+'｜'+r.pct.toFixed(2)+'%')});
+ lines.push('');
+ lines.push('【人工補充遺漏文字指令】');
+ if(!(S.manualSupplements||[]).length)lines.push('無');
+ (S.manualSupplements||[]).forEach(x=>lines.push(x.date+' '+(x.time||'')+'｜'+x.code+' '+cleanStockName(x.name)+'｜'+x.action+(x.qtyRule==='half'?'一半':x.qtyRule==='all'?'賣光':x.qtyRule==='half_buy'?'一半':'')+'｜'+x.raw));
  lines.push('');
  lines.push('【每筆買賣明細】');
  (result.ledger||[]).forEach(r=>lines.push(r.date+' '+(r.time||'')+'｜'+r.code+' '+r.name+'｜'+r.action+'｜成交 '+Number(r.price).toFixed(2)+'｜'+r.qty+'股｜成本 '+Number(r.costPrice||0).toFixed(2)+'｜金額 '+fmt(r.amount)+'｜損益 '+(r.action==='賣出'?fmt(r.realizedPnl):'-')));
