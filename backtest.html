@@ -248,6 +248,7 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
             <tbody id="tradeLedger"></tbody>
           </table>
         </div>
+        <div id="cancelledTradeList" class="border-t bg-slate-50" data-no-export="true"></div>
       </div>
 
       <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -511,10 +512,13 @@ function classifyStock(sentence,stock,stockCount){
  ].map(h=>({...h,dist:distanceToStock(h,stock)})).filter(h=>h.dist<=60).sort((a,b)=>a.dist-b.dist||a.index-b.index);
  const local=sentence.slice(Math.max(0,stock.index-55),Math.min(sentence.length,stock.index+stock.full.length+80));
  let action='忽略',qtyRule='',reason=[],confidence=.96,condition=inferCondition(local);
- const before=sentence.slice(Math.max(0,stock.index-18),stock.index);
- const after=sentence.slice(stock.index+stock.full.length,Math.min(sentence.length,stock.index+stock.full.length+18));
+ const before=sentence.slice(Math.max(0,stock.index-30),stock.index);
+ const after=sentence.slice(stock.index+stock.full.length,Math.min(sentence.length,stock.index+stock.full.length+24));
+ const descriptiveNegative=/(不會採用|不採用|沒有採用|非採用|不是要買|沒有要買|只是提到|僅提到)[^，。；]{0,24}$/.test(before);
  const explicitBuyHalf=(/買|買進|買回|再買|先買/.test(before) && /一半|半部位/.test(after)) || RX.buyHalf.test(local);
- if(hits.length){
+ if(descriptiveNegative){
+   action='忽略';qtyRule='';reason.push('描述性提及，非交易標的');confidence=.99;
+ }else if(hits.length){
    const nearest=hits[0];
    const competing=hits.filter(h=>h.type!==nearest.type&&Math.abs(h.dist-nearest.dist)<=10);
    if(competing.length){
@@ -705,6 +709,7 @@ function simulate(signals,{infinite,capital,allocation,maxStocks}){
  const ensure=code=>pos[code]||(pos[code]={qty:0,cost:0,name:''});
  const ordered=signals.map(s=>Object.assign({},s,S.tradeOverrides[s.id]||{})).sort((a,b)=>((a.date||'')+' '+(a.time||'')).localeCompare((b.date||'')+' '+(b.time||'')));
  for(const s of ordered){
+   if(s.action!=='買入'&&s.action!=='賣出')continue;
    const basePrice=S.prices.get(s.date+'|'+s.code);
    const price=Number.isFinite(Number(s.price))&&Number(s.price)>0?Number(s.price):basePrice;
    if(!price){skipped.push({...s,reason:'缺少收盤價'});continue}
@@ -842,7 +847,7 @@ function renderTradeLedger(result){
        '<td class="p-2"><input data-f="date" type="date" class="trade-input" value="'+escapeHtml(r.date)+'"></td>'+
        '<td class="p-2"><input data-f="time" type="time" class="trade-input" value="'+escapeHtml(r.time||'09:00')+'"></td>'+
        '<td class="p-2"><div class="grid grid-cols-2 gap-1"><input data-f="code" class="trade-input" value="'+escapeHtml(r.code)+'"><input data-f="name" class="trade-input" value="'+escapeHtml(r.name||'')+'"></div></td>'+
-       '<td class="p-2"><select data-f="action" class="trade-input"><option '+(r.action==='買入'?'selected':'')+'>買入</option><option '+(r.action==='賣出'?'selected':'')+'>賣出</option></select></td>'+
+       '<td class="p-2"><select data-f="action" class="trade-input"><option '+(r.action==='買入'?'selected':'')+'>買入</option><option '+(r.action==='賣出'?'selected':'')+'>賣出</option><option>取消 / 忽略</option></select></td>'+
        '<td class="p-2"><input data-f="price" type="number" min="0.01" step="0.01" class="trade-input text-right" value="'+r.price+'"></td>'+
        '<td class="p-2"><input data-f="qty" type="number" min="1" step="1" class="trade-input text-right" value="'+r.qty+'"></td>'+
        '<td class="p-2"><input data-f="costPrice" type="number" min="0" step="0.01" class="trade-input text-right" value="'+Number(r.costPrice||0).toFixed(2)+'"></td>'+
@@ -863,18 +868,49 @@ function renderTradeLedger(result){
      '<td class="p-3 text-right font-mono font-black '+(r.realizedPnl>0?'text-red-600':r.realizedPnl<0?'text-green-600':'text-slate-400')+'">'+(r.action==='賣出'?fmt(r.realizedPnl):'—')+'</td>'+
      '<td class="p-3 text-right font-mono">'+tradeNumber(r.positionAfter,0)+'</td>'+
      '<td class="p-3 text-right font-mono">'+(r.cashAfter==null?'—':fmt(r.cashAfter))+'</td>'+
-     '<td class="p-3 text-center" data-no-export="true"><button type="button" data-edit-trade="'+escapeHtml(r.signalId)+'" class="bg-yellow-100 text-yellow-800 px-3 py-1.5 rounded-lg font-black">編輯</button>'+(r.manual?' <button type="button" data-reset-trade="'+escapeHtml(r.signalId)+'" class="bg-slate-100 text-slate-500 px-2 py-1.5 rounded-lg font-bold">復原</button>':'')+'</td></tr>';
+     '<td class="p-3 text-center" data-no-export="true"><div class="flex gap-1 justify-center"><button type="button" data-edit-trade="'+escapeHtml(r.signalId)+'" class="bg-yellow-100 text-yellow-800 px-3 py-1.5 rounded-lg font-black">編輯</button><button type="button" data-ignore-trade="'+escapeHtml(r.signalId)+'" class="bg-red-100 text-red-700 px-3 py-1.5 rounded-lg font-black">取消此筆</button>'+(r.manual?' <button type="button" data-reset-trade="'+escapeHtml(r.signalId)+'" class="bg-slate-100 text-slate-500 px-2 py-1.5 rounded-lg font-bold">復原</button>':'')+'</div></td></tr>';
  }).join('')||'<tr><td colspan="12" class="p-8 text-center text-slate-400">沒有符合條件的成交明細</td></tr>';
- box.querySelectorAll('[data-edit-trade]').forEach(b=>b.addEventListener('click',()=>{S.editingTradeId=b.dataset.editTrade;renderTradeLedger(result)}));
+ renderCancelledTrades();
+  box.querySelectorAll('[data-edit-trade]').forEach(b=>b.addEventListener('click',()=>{S.editingTradeId=b.dataset.editTrade;renderTradeLedger(result)}));
+ box.querySelectorAll('[data-ignore-trade]').forEach(b=>b.addEventListener('click',()=>{
+   if(!confirm('確定取消這筆誤判交易？取消後會重新計算全部回測結果。'))return;
+   const id=b.dataset.ignoreTrade;
+   const s=S.signals.find(x=>x.id===id);
+   S.tradeOverrides[id]={action:'忽略',qtyRule:'',cancelled:true,originalCode:s?s.code:'',originalName:s?cleanStockName(s.name):''};
+   S.editingTradeId=null;rerunWithTradeOverrides();
+   document.getElementById('exportStatus').textContent='已取消誤判交易並重新計算。';
+ }));
  box.querySelectorAll('[data-cancel-trade]').forEach(b=>b.addEventListener('click',()=>{S.editingTradeId=null;renderTradeLedger(result)}));
  box.querySelectorAll('[data-reset-trade]').forEach(b=>b.addEventListener('click',()=>{delete S.tradeOverrides[b.dataset.resetTrade];S.editingTradeId=null;rerunWithTradeOverrides()}));
  box.querySelectorAll('[data-save-trade]').forEach(b=>b.addEventListener('click',()=>saveTradeRow(b.dataset.saveTrade)));
+}
+
+function renderCancelledTrades(){
+ const box=document.getElementById('cancelledTradeList');if(!box)return;
+ const items=Object.entries(S.tradeOverrides||{}).filter(([,v])=>v&&v.action==='忽略'&&v.cancelled);
+ if(!items.length){box.innerHTML='';return}
+ box.innerHTML='<details><summary class="cursor-pointer p-3 text-xs font-black text-red-700">已取消誤判 '+items.length+' 筆（可復原）</summary><div class="divide-y bg-white">'+
+ items.map(([id,v])=>{
+   const s=S.signals.find(x=>x.id===id)||{};
+   return '<div class="p-3 flex flex-col md:flex-row md:items-center justify-between gap-2 text-xs"><div><b>'+escapeHtml((s.date||'')+' '+(s.time||'')+' '+(v.originalCode||s.code||'')+' '+(v.originalName||cleanStockName(s.name||'')))+'</b><div class="text-slate-400 mt-1">'+escapeHtml(s.raw||'')+'</div></div><button type="button" data-restore-cancel="'+escapeHtml(id)+'" class="bg-slate-100 text-slate-700 px-3 py-2 rounded-lg font-bold">復原這筆</button></div>';
+ }).join('')+'</div></details>';
+ box.querySelectorAll('[data-restore-cancel]').forEach(b=>b.addEventListener('click',()=>{
+   delete S.tradeOverrides[b.dataset.restoreCancel];
+   rerunWithTradeOverrides();
+   document.getElementById('exportStatus').textContent='已復原交易並重新計算。';
+ }));
 }
 function saveTradeRow(id){
  const row=document.querySelector('[data-trade-row="'+CSS.escape(id)+'"]');if(!row)return;
  const val=f=>row.querySelector('[data-f="'+f+'"]').value.trim();
  const date=val('date'),time=val('time'),code=val('code'),name=val('name'),action=val('action');
  const price=Number(val('price')),qty=Math.floor(Number(val('qty'))),costPrice=Number(val('costPrice'));
+ if(action==='取消 / 忽略'){
+   S.tradeOverrides[id]={action:'忽略',qtyRule:'',cancelled:true,originalCode:code,originalName:cleanStockName(name)};
+   S.editingTradeId=null;rerunWithTradeOverrides();
+   document.getElementById('exportStatus').textContent='已取消誤判交易並重新計算。';
+   return;
+ }
  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){alert('日期格式不正確');return}
  if(!/^\d{2}:\d{2}$/.test(time)){alert('時間格式不正確');return}
  if(!/^\d{4}$/.test(code)){alert('股票代號請輸入 4 碼');return}
@@ -967,7 +1003,7 @@ function renderResults(){
  document.getElementById('infinitePnl').className='block mt-1 '+(infinite.realized>=0?'text-red-600':'text-green-600');
  document.getElementById('infiniteRounds').textContent=infinite.rounds.length;
  document.getElementById('infiniteTrades').textContent=infinite.filled;
- renderReviewHistory();renderSettlementMode();lucide.createIcons();
+ renderReviewHistory();renderSettlementMode();renderCancelledTrades();lucide.createIcons();
 }
 
 const STORAGE_KEY='billjohn_backtest_saved_v1';
