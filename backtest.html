@@ -307,8 +307,8 @@ const RX={
  discretionary:/看自己決定|自由決定|要不要都買|想轉去|想轉入|都可以|有機會再|會找機會|之後再|再來加碼|等.*再/,
  conditionNoPosition:/新進會員|新會員|沒有持股|沒持股|沒成交的/,
  noAdd:/有持股.*不用加碼|有持股.*不必加碼|有持股的還不用加碼/,
- noAction:/續抱|持股都續抱|先持股續抱|先不用加碼|還不用加碼|目前先不必|沒到價|就不必出手|先不用動作|今天沒有動作|沒有動作|靜待/,
- historicalLead:/已經|之前|前面|早就/
+ noAction:/續抱|持股都續抱|先持股續抱|先不用加碼|還不用加碼|目前先不必|沒到價|就不必出手|先不用動作|今天沒有動作|沒有動作|靜待|自行處理|還持有的就不用問/,
+ historicalLead:/已經|之前|前面|早就|昨天|先前/
 };
 
 function collectActionHits(sentence, regex, type){
@@ -597,7 +597,7 @@ function simulate(signals,{infinite,capital,allocation,maxStocks}){
      if(active[s.code]){const r=active[s.code];const roundPnl=r.sellProceeds-r.buyCost;rounds.push({...r,end:s.date,pnl:roundPnl,pct:r.buyCost?roundPnl/r.buyCost*100:0});delete active[s.code]}
    }
  }
- return{cash,realized,filled,skipped,rounds,pos,ledger};
+ return reconcileEndingPositions({cash,realized,filled,skipped,rounds,pos,ledger});
 }
 function rerunWithTradeOverrides(){
  if(!S.results||!S.signals.length)return false;
@@ -635,7 +635,42 @@ function groupMonths(rounds){
  return Object.values(map).sort((a,b)=>a.month.localeCompare(b.month));
 }
 function openRows(result){
- return Object.entries(result.pos||{}).filter(([,p])=>p.qty>0).map(([code,p])=>({code,name:p.name||'',qty:p.qty,cost:p.cost,avg:p.qty?p.cost/p.qty:0})).sort((a,b)=>b.cost-a.cost);
+ // 期末庫存以「逐筆成交明細的最後一筆 positionAfter」為唯一真相，
+ // 避免 result.pos 與交易明細因舊快照/手動修改不同步。
+ const last=new Map();
+ (result.ledger||[]).forEach(r=>{
+   last.set(r.code,{
+     code:r.code,
+     name:cleanStockName(r.name||''),
+     qty:Number(r.positionAfter)||0,
+     avg:Number(r.avgCostAfter)||0,
+     lastAction:r.action,
+     lastDate:r.date,
+     lastTime:r.time||''
+   });
+ });
+ const rows=[];
+ last.forEach(x=>{
+   if(x.qty>0)rows.push({...x,cost:x.qty*x.avg});
+ });
+ return rows.sort((a,b)=>b.cost-a.cost);
+}
+function reconcileEndingPositions(result){
+ const last=new Map();
+ (result.ledger||[]).forEach(r=>last.set(r.code,r));
+ const mismatches=[];
+ last.forEach((r,code)=>{
+   const p=(result.pos||{})[code]||{qty:0,cost:0,name:r.name||''};
+   const ledgerQty=Number(r.positionAfter)||0;
+   const posQty=Number(p.qty)||0;
+   if(ledgerQty!==posQty)mismatches.push({code,ledgerQty,posQty,lastAction:r.action,date:r.date,time:r.time||''});
+   p.qty=ledgerQty;
+   p.cost=ledgerQty*(Number(r.avgCostAfter)||0);
+   p.name=cleanStockName(r.name||p.name||'');
+   result.pos[code]=p;
+ });
+ result.positionMismatches=mismatches;
+ return result;
 }
 function renderReviewHistory(){
  const box=document.getElementById('reviewHistory');
@@ -768,6 +803,11 @@ function renderSettlementMode(){
  const skips=result.skipped||[];document.getElementById('skipList').innerHTML=skips.slice(0,120).map(s=>'<div class="p-4 text-sm flex justify-between gap-3"><div><b>'+s.date+' '+s.code+' '+s.name+'</b><div class="text-xs text-slate-400 mt-1">'+escapeHtml(s.raw)+'</div></div><span class="text-xs font-bold text-orange-600 shrink-0">'+s.reason+'</span></div>').join('')||'<div class="p-6 text-center text-slate-400">沒有未成交指令</div>';
  renderTradeLedger(result);
  renderOpenPositions(result);
+ const mismatchCount=(result.positionMismatches||[]).length;
+ const openBox=document.getElementById('openPositions');
+ if(mismatchCount&&openBox){
+   openBox.insertAdjacentHTML('afterbegin','<div class="col-span-full bg-red-950/60 border border-red-700 rounded-xl p-3 text-xs text-red-100"><b>已自動修正 '+mismatchCount+' 筆庫存一致性異常</b><div class="mt-1">期末庫存已改以逐筆成交明細的最後交易後庫存為準。</div></div>');
+ }
 }
 function renderResults(){
  const {finite,infinite}=S.results;
