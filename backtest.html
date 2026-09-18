@@ -146,41 +146,99 @@ document.getElementById('fileInput').addEventListener('change',async e=>{const f
 function parseLine(text){
  const lines=text.split(/\r?\n/),out=[];let date='',cur=null;
  const flush=()=>{if(cur&&cur.text.trim())out.push(cur);cur=null};
- for(const line0 of lines){const line=line0.trimEnd();if(!line.trim())continue;
-   const dm=line.match(/^(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})/);if(dm&&!/^\d{1,2}:\d{2}/.test(line)){flush();date=dm[1]+'-'+String(dm[2]).padStart(2,'0')+'-'+String(dm[3]).padStart(2,'0');continue}
-   const tm=line.match(/^(\d{1,2}:\d{2})\s+(.+?)\s+(\[葉宇乘-進階組:\].*)$/);
-   if(tm){flush();cur={date,time:tm[1],sender:tm[2],text:tm[3]};continue}
+ for(const line0 of lines){
+   const line=line0.trimEnd();if(!line.trim())continue;
+   const dm=line.match(/^(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})/);
+   if(dm&&!/^\d{1,2}:\d{2}\s/.test(line)){
+     flush();date=dm[1]+'-'+String(dm[2]).padStart(2,'0')+'-'+String(dm[3]).padStart(2,'0');continue;
+   }
+   // 任何新時間戳都代表上一則訊息結束。只有帶老師標籤的訊息才開始收集。
+   const tm=line.match(/^(\d{1,2}:\d{2})\s+(.+?)\s+(.*)$/);
+   if(tm){
+     flush();
+     const rest=tm[3]||'';
+     if(rest.includes('[葉宇乘-進階組:]')){
+       cur={date,time:tm[1],sender:tm[2],text:rest.replace(/^.*?\[葉宇乘-進階組:\]\s*/,'').trim()};
+     }
+     continue;
+   }
+   // LINE 多行訊息：只有在老師訊息尚未被下一個時間戳截斷時才續接。
    if(cur)cur.text+='\n'+line.trim();
- }flush();return out;
+ }
+ flush();return out;
+}
+const RX={
+ buy:/建立基本持股|建立回基本持股|建立第一次(?:基本)?持股|建立持股|開始佈局|先建立|買進|進場|直接加碼|可以加碼|可加碼|再度加碼|同樣.*加碼|平盤下加碼|跌停.*加碼|酌量加碼/,
+ half:/獲利一半|賣一半|減碼一半|獲利減碼一半|順勢.*一半/,
+ sell:/全數獲利了結|全數.*(?:獲利)?了結|獲利了結|停損賣出|停損出場|小賠停損|停損|出清|賣光|資金收回/,
+ noBuy:/不用加碼|不必加碼|先不加碼|還不用加碼|目前先不必|沒到價|沒有.*可買|就不必出手|先不用動作|今天沒有動作|沒有動作/,
+ hold:/續抱|持股都續抱|先持股續抱|自行處理|等候通知|靜待/,
+ convert:/轉進|轉入|轉去|轉換|換股|換過去|換到/,
+ condition:/新進會員|新會員|沒有持股|沒持股|有持股.*不用加碼|有持股.*不必加碼|沒加碼過|加碼過.*不必加碼/
+};
+function cleanStockName(name){
+ return String(name||'')
+  .replace(/^(進階組[:：]?|基本組[:：]?|今天|昨天|新進會員|新會員|手上沒有|沒有|持有|利用|跌停附近的|平盤下的|我們家的|我們家|光看|除了|以及|然後|至於|進場)+/g,'')
+  .replace(/^\d+(?:\.\d+)?(?:[-~到]\d+(?:\.\d+)?)?附近的/,'')
+  .replace(/^[^A-Za-z\u4e00-\u9fff]+/,'')
+  .trim();
+}
+function extractStocks(sentence){
+ const re=/([^\s，。；：:、]{1,18})\s*[（(](\d{4})[）)]/g;let m,arr=[];
+ while((m=re.exec(sentence)))arr.push({code:m[2],name:cleanStockName(m[1]),index:m.index});
+ return arr;
+}
+function actionTypes(text){
+ const types=[];if(RX.half.test(text))types.push('half');if(RX.sell.test(text))types.push('sell');if(RX.buy.test(text)&&!RX.noBuy.test(text))types.push('buy');return [...new Set(types)];
+}
+function nearestAction(sentence,stockIndex){
+ const hits=[];const defs=[
+   ['half',/獲利一半|賣一半|減碼一半|獲利減碼一半|順勢.*一半/g],
+   ['sell',/全數獲利了結|全數.*?(?:獲利)?了結|獲利了結|停損賣出|停損出場|小賠停損|停損|出清|賣光|資金收回/g],
+   ['buy',/建立基本持股|建立回基本持股|建立第一次(?:基本)?持股|建立持股|開始佈局|先建立|買進|進場|直接加碼|可以加碼|可加碼|再度加碼|酌量加碼/g]
+ ];
+ defs.forEach(([type,re])=>{let m;while((m=re.exec(sentence)))hits.push({type,index:m.index,dist:Math.abs(m.index-stockIndex)});});
+ hits.sort((a,b)=>a.dist-b.dist);return hits[0]?hits[0].type:null;
 }
 function classifyText(m){
- const raw=m.text.replace(/^\[葉宇乘-進階組:\]\s*/,'').trim();
- const stockRe=/([A-Za-z\u4e00-\u9fff*\-]+)?\s*[（(](\d{4})[）)]/g;let mm,stocks=[];
- while((mm=stockRe.exec(raw)))stocks.push({name:(mm[1]||'').trim(),code:mm[2]});
- const uniq=[];stocks.forEach(x=>{if(!uniq.some(y=>y.code===x.code))uniq.push(x)});
- if(!uniq.length)return[];
- return uniq.map(st=>{
-   let action='忽略',qtyRule='',reason=[],confidence=.9;
-   const sellHalf=/獲利一半|賣一半|減碼一半|一半.*獲利|獲利減碼一半/.test(raw);
-   const sellAll=/全數獲利了結|全數.*出|獲利了結|停損賣出|停損出場|停損|出清|賣光|資金收回/.test(raw);
-   const buy=/建立基本持股|建立持股|建立回基本持股|開始佈局|先.*建立.*持股|加碼|買進|進場/.test(raw);
-   const hold=/續抱|持股都續抱|不用動|不必動作|沒有動作/.test(raw);
-   const correction=/更正|沒有要買|打太快/.test(raw);
-   if(correction){action='忽略';reason.push('更正/撤銷語意');confidence=.55}
-   else if(sellHalf){action='賣出';qtyRule='half';reason.push('部分賣出');}
-   else if(sellAll){action='賣出';qtyRule='all';reason.push('完整出場');}
-   else if(buy&&!hold){action='買入';qtyRule='one_lot';reason.push('明確買入/加碼');}
-   else {reason.push('沒有明確執行動作');}
-   if(/新進會員|新會員/.test(raw))reason.push('含新會員條件');
-   if(/有持股.*不用加碼|有持股.*不必加碼|沒加碼過|沒有持股|沒持股/.test(raw))reason.push('持股條件句');
-   if(/轉進|轉入|轉去|換股|轉移/.test(raw))reason.push('換股語意');
-   if(uniq.length>1)reason.push('同句多股票');
-   const price=(raw.match(/(\d+(?:\.\d+)?)\s*[-~到]\s*(\d+(?:\.\d+)?)/)||[]);
-   return {id:m.date+'-'+m.time+'-'+st.code,date:m.date,time:m.time,code:st.code,name:st.name,action,qtyRule,suggested:price.length?price[1]+'-'+price[2]:'',raw,reason:reason.join('、'),confidence};
- });
+ const raw=m.text.trim();
+ // 用「句」而不是整則訊息判斷，避免 A 股票的賣出動作污染到同訊息內 B 股票。
+ const sentences=raw.split(/(?<=[。！？!?；;])|\n+/).map(x=>x.trim()).filter(Boolean);
+ const rows=[];let serial=0;
+ for(const sentence of sentences){
+   const stocks=extractStocks(sentence);if(!stocks.length)continue;
+   const types=actionTypes(sentence);
+   const mixed=types.length>1;
+   stocks.forEach(st=>{
+     let t=types.length===1?types[0]:(mixed?nearestAction(sentence,st.index):null);
+     let action='忽略',qtyRule='',reason=[],confidence=.92,condition='always';
+     if(t==='half'){action='賣出';qtyRule='half';reason.push('部分賣出');}
+     else if(t==='sell'){action='賣出';qtyRule='all';reason.push('完整出場');}
+     else if(t==='buy'){action='買入';qtyRule='one_lot';reason.push('明確買入/加碼');}
+     else reason.push('沒有明確執行動作');
+     if(RX.noBuy.test(sentence)&&action==='買入'){action='忽略';qtyRule='';reason.push('含否定買入語意');confidence=.7;}
+     if(RX.condition.test(sentence)){
+       reason.push('持股/會員條件句');confidence=Math.min(confidence,.78);
+       if(/沒有持股|沒持股|新進會員|新會員/.test(sentence)&&!/舊會員|有持股.*加碼|仍能.*加碼/.test(sentence))condition='if_no_position';
+     }
+     if(RX.convert.test(sentence)){reason.push('換股語意');confidence=Math.min(confidence,.72);}
+     if(mixed){reason.push('同句混合買賣語意');confidence=Math.min(confidence,.65);}
+     if(stocks.length>1){reason.push('同句多股票');confidence=Math.min(confidence,.8);}
+     const pm=sentence.match(/(\d+(?:\.\d+)?)\s*[-~到]\s*(\d+(?:\.\d+)?)/);
+     rows.push({id:m.date+'-'+m.time+'-'+st.code+'-'+(++serial),date:m.date,time:m.time,code:st.code,name:st.name,action,qtyRule,condition,suggested:pm?pm[1]+'-'+pm[2]:'',raw:sentence,reason:reason.join('、'),confidence});
+   });
+ }
+ // 更正訊息可能只有裸代號，保留成覆核項，避免 6781/6788 這類修正消失。
+ if(/更正|打太快|沒有要買/.test(raw)){
+   const bare=raw.match(/(?:更正|修正)\s*(\d{4})/);
+   if(bare&&!rows.some(r=>r.code===bare[1]))rows.push({id:m.date+'-'+m.time+'-correction-'+bare[1],date:m.date,time:m.time,code:bare[1],name:'',action:'忽略',qtyRule:'',condition:'manual',suggested:'',raw,reason:'更正訊息：請人工確認前一筆代號或動作',confidence:.2});
+ }
+ return rows;
 }
-function forceReview(s){return s.action==='賣出'||/條件|換股|多股票|更正/.test(s.reason)||s.confidence<.8||Math.abs(hash(s.id))%20===0}
 function hash(x){let h=0;for(let i=0;i<x.length;i++)h=((h<<5)-h)+x.charCodeAt(i)|0;return h}
+function forceReview(s){
+ return s.action==='賣出'||s.confidence<.85||/條件句|換股語意|同句多股票|混合買賣|更正訊息/.test(s.reason)||Math.abs(hash(s.id))%20===0;
+}
 function renderReview(){
  const box=document.getElementById('reviewList');box.innerHTML='';S.review.forEach(s=>{
    const d=document.createElement('div');d.className='p-4 bg-white';d.dataset.id=s.id;
