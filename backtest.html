@@ -181,12 +181,17 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
           </div>
         </div>
 
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           <div class="bg-gradient-to-br from-yellow-100 to-orange-100 rounded-2xl p-4 border-4 border-yellow-300 shadow-lg">
             <p class="text-xs font-black text-slate-500">已實現損益</p><div id="summaryPnl" class="text-2xl font-black mt-1">$0</div>
           </div>
           <div class="bg-white rounded-2xl p-4 border-2 border-yellow-200 shadow">
-            <p class="text-xs font-black text-slate-500">結算報酬率</p><div id="summaryReturn" class="text-2xl font-black mt-1">0%</div>
+            <p class="text-xs font-black text-slate-500">已結算交易報酬率</p><div id="summarySettledReturn" class="text-2xl font-black mt-1">0%</div>
+            <p class="text-[10px] text-slate-400 mt-1">已實現損益 ÷ 已賣出部位成本</p>
+          </div>
+          <div class="bg-white rounded-2xl p-4 border-2 border-yellow-200 shadow">
+            <p class="text-xs font-black text-slate-500">本金報酬率</p><div id="summaryCapitalReturn" class="text-2xl font-black mt-1">0%</div>
+            <p id="summaryCapitalReturnNote" class="text-[10px] text-slate-400 mt-1">已實現損益 ÷ 起始本金</p>
           </div>
           <div class="bg-white rounded-2xl p-4 border-2 border-yellow-200 shadow">
             <p class="text-xs font-black text-slate-500">勝率</p><div id="summaryWinRate" class="text-2xl font-black mt-1">0%</div>
@@ -215,6 +220,42 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
               <div><span class="text-slate-400">完整輪次</span><b id="infiniteRounds" class="block mt-1">0</b></div>
               <div><span class="text-slate-400">已實現</span><b id="infinitePnl" class="block mt-1">$0</b></div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-slate-900 text-white rounded-2xl border-2 border-yellow-300 shadow-lg overflow-hidden">
+        <div class="p-5 border-b border-slate-700 flex flex-col md:flex-row md:items-end justify-between gap-2">
+          <div>
+            <h3 class="font-black text-xl text-yellow-300">回測計算邏輯與閱讀規則</h3>
+            <p class="text-xs text-slate-300 mt-1">提供給其他閱讀者理解本頁數字如何產生；設定值會依本次回測自動更新。</p>
+          </div>
+          <span id="ruleModeLabel" class="text-xs bg-yellow-300 text-slate-900 px-3 py-1.5 rounded-full font-black">有限本金</span>
+        </div>
+        <div class="grid md:grid-cols-2 xl:grid-cols-3 gap-3 p-5 text-sm">
+          <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+            <div class="font-black text-yellow-300">① 價格與成交基準</div>
+            <div class="mt-2 text-slate-300 leading-relaxed">每筆有效指令預設使用「指令當日收盤價」成交；若人工編輯成交價，則以人工值覆蓋。原文中的「XX 以下／區間附近」目前不另外檢查是否符合條件。缺少收盤價則列為未成交。</div>
+          </div>
+          <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+            <div class="font-black text-yellow-300">② 有限本金模式</div>
+            <div id="finiteRuleText" class="mt-2 text-slate-300 leading-relaxed"></div>
+          </div>
+          <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+            <div class="font-black text-yellow-300">③ 無限本金模式</div>
+            <div class="mt-2 text-slate-300 leading-relaxed">不受現金與同時持股檔數限制。一般買入每次以 1,000 股模擬；「買入一半」以 500 股模擬。用途是觀察「每一筆有效指令都能跟單」時的策略表現，不代表實際可投入資金規模。</div>
+          </div>
+          <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+            <div class="font-black text-yellow-300">④ 買賣與持股規則</div>
+            <div class="mt-2 text-slate-300 leading-relaxed">買入會加入既有庫存並以移動平均成本計算；「賣一半」賣出當下庫存約 50%；「賣光／停損／獲利了結」使庫存歸零。沒有持股卻收到賣出指令，列為「無持股可賣」。</div>
+          </div>
+          <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+            <div class="font-black text-yellow-300">⑤ 損益與兩種報酬率</div>
+            <div class="mt-2 text-slate-300 leading-relaxed"><b class="text-white">已實現損益</b>為已賣出股數依成交價與成本價計算的損益。<br><b class="text-white">已結算交易報酬率</b>＝已實現損益 ÷ 已賣出部位的成本基礎。<br><b class="text-white">本金報酬率</b>＝已實現損益 ÷ 起始本金；無限本金模式沒有固定本金，因此不適用。</div>
+          </div>
+          <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+            <div class="font-black text-yellow-300">⑥ 結算、人工修正與限制</div>
+            <div class="mt-2 text-slate-300 leading-relaxed">股票庫存歸零後視為完成一個操作輪次；月份績效依最後賣光日歸類。期末仍持有者不算完整輪次。人工覆核、補充遺漏指令、取消誤判與明細編輯都會重新計算。<b class="text-white">目前未計入手續費、交易稅、滑價、股利與公司行動。</b></div>
           </div>
         </div>
       </div>
@@ -799,8 +840,12 @@ document.getElementById('runBtn').onclick=async()=>{
  }catch(e){alert('回測失敗：'+e.message);}finally{b.disabled=false;b.textContent='抓取價格並執行雙模式回測';}
 };
 function roundStats(result,mode){
- const rounds=result.rounds||[];const wins=rounds.filter(r=>r.pnl>0).length;const invested=rounds.reduce((a,r)=>a+(r.buyCost||0),0);
- return{rounds:rounds.length,wins,winRate:rounds.length?wins/rounds.length*100:0,returnPct:invested?result.realized/invested*100:0,invested};
+ const rounds=result.rounds||[];
+ const wins=rounds.filter(r=>r.pnl>0).length;
+ const settledCost=(result.ledger||[]).filter(r=>r.action==='賣出').reduce((a,r)=>a+(Number(r.costPrice)||0)*(Number(r.qty)||0),0);
+ const settledReturnPct=settledCost?result.realized/settledCost*100:0;
+ const capitalReturnPct=mode==='finite'&&S.startingCapital?result.realized/S.startingCapital*100:null;
+ return{rounds:rounds.length,wins,winRate:rounds.length?wins/rounds.length*100:0,settledCost,settledReturnPct,capitalReturnPct};
 }
 function groupMonths(rounds){
  const map={};(rounds||[]).forEach(r=>{const month=(r.end||'').slice(0,7);if(!month)return;if(!map[month])map[month]={month,pnl:0,cost:0,rounds:0,wins:0};const x=map[month];x.pnl+=r.pnl||0;x.cost+=r.buyCost||0;x.rounds++;if((r.pnl||0)>0)x.wins++;});
@@ -1025,13 +1070,31 @@ function renderRepresentativeWorks(result,mode){
  if(pBox)pBox.innerHTML=profits.map((x,i)=>representativeRow(x,pMax,i+1,'profit')).join('')||'<div class="text-center text-slate-400 py-8 text-sm">目前沒有已結算獲利股票</div>';
  if(lBox)lBox.innerHTML=losses.map((x,i)=>representativeRow(x,lMax,i+1,'loss')).join('')||'<div class="text-center text-slate-400 py-8 text-sm">目前沒有已結算虧損股票</div>';
 }
+
+function renderCalculationRules(mode){
+ const cap=Number(document.getElementById('capitalInput').value)||S.startingCapital||0;
+ const allocation=Number(document.getElementById('allocationInput').value)||0;
+ const maxStocks=Number(document.getElementById('maxStocksInput').value)||0;
+ const finiteText='起始本金 <b class="text-white">'+fmt(cap)+'</b>；每次有效一般買入以「單一股票目標配額」<b class="text-white">'+fmt(allocation)+'</b> 換算可買股數，「買入一半」使用配額的 50%。同時最多持有 <b class="text-white">'+maxStocks+' 檔</b>；持股已達上限時，只限制新開股票，既有股票仍可加碼。若預計買入金額高於剩餘現金，系統會縮減至現金可買的股數；賣出所得會回到現金池供後續指令使用。';
+ const el=document.getElementById('finiteRuleText');if(el)el.innerHTML=finiteText;
+ const ml=document.getElementById('ruleModeLabel');if(ml)ml.textContent=mode==='finite'?'目前檢視：有限本金':'目前檢視：無限本金';
+}
 function renderSettlementMode(){
  if(!S.results)return;const mode=S.resultMode;const result=S.results[mode];const st=roundStats(result,mode);
  document.querySelectorAll('.result-mode').forEach(b=>{const on=b.dataset.resultMode===mode;b.className='result-mode px-3 py-2 rounded-lg text-xs font-black '+(on?'bg-orange-600 text-white':'text-slate-500')});
  document.getElementById('monthModeLabel').textContent=mode==='finite'?'有限本金':'無限本金';
  document.getElementById('summaryPnl').textContent=fmt(result.realized);
  document.getElementById('summaryPnl').className='text-2xl font-black mt-1 '+(result.realized>=0?'text-red-600':'text-green-600');
- document.getElementById('summaryReturn').textContent=(st.returnPct>=0?'+':'')+st.returnPct.toFixed(2)+'%';
+ document.getElementById('summarySettledReturn').textContent=(st.settledReturnPct>=0?'+':'')+st.settledReturnPct.toFixed(2)+'%';
+ const capitalEl=document.getElementById('summaryCapitalReturn');
+ const capitalNote=document.getElementById('summaryCapitalReturnNote');
+ if(mode==='finite'){
+   capitalEl.textContent=(st.capitalReturnPct>=0?'+':'')+st.capitalReturnPct.toFixed(2)+'%';
+   capitalNote.textContent='已實現損益 ÷ 起始本金';
+ }else{
+   capitalEl.textContent='不適用';
+   capitalNote.textContent='無限本金沒有固定起始本金';
+ }
  document.getElementById('summaryWinRate').textContent=st.winRate.toFixed(1)+'%';
  document.getElementById('summaryRounds').textContent=st.rounds;
  document.getElementById('summarySkipped').textContent=result.skipped.length;
@@ -1043,6 +1106,7 @@ function renderSettlementMode(){
  renderTradeLedger(result);
  renderOpenPositions(result);
  renderRepresentativeWorks(result,mode);
+ renderCalculationRules(mode);
  const mismatchCount=(result.positionMismatches||[]).length;
  const openBox=document.getElementById('openPositions');
  if(mismatchCount&&openBox){
@@ -1164,11 +1228,20 @@ function currentReportText(){
  lines.push('');
  lines.push('【結算總覽】');
  lines.push('已實現損益：'+fmt(result.realized));
- lines.push('結算報酬率：'+st.returnPct.toFixed(2)+'%');
+ lines.push('已結算交易報酬率：'+st.settledReturnPct.toFixed(2)+'%');
+ lines.push('本金報酬率：'+(mode==='finite'?st.capitalReturnPct.toFixed(2)+'%':'不適用（無限本金）'));
  lines.push('勝率：'+st.winRate.toFixed(1)+'%');
  lines.push('完整操作輪次：'+st.rounds);
  lines.push('未成交指令：'+result.skipped.length);
  if(mode==='finite'){lines.push('起始本金：'+fmt(S.startingCapital));lines.push('期末現金：'+fmt(result.cash));}
+ lines.push('');
+ lines.push('【回測計算邏輯與閱讀規則】');
+ lines.push('價格：有效指令預設使用指令當日收盤價；人工成交價可覆蓋；缺價則未成交。');
+ lines.push('有限本金：起始本金 '+fmt(S.startingCapital)+'；單一股票目標配額 '+fmt(Number(document.getElementById('allocationInput').value)||0)+'；同時最多持有 '+(Number(document.getElementById('maxStocksInput').value)||0)+' 檔。達持股上限只限制新開股票；既有持股仍可加碼。資金不足時縮減至剩餘現金可買股數。');
+ lines.push('無限本金：不受現金與持股檔數限制；一般買入每次 1,000 股，買入一半 500 股。');
+ lines.push('已結算交易報酬率＝已實現損益 ÷ 已賣出部位成本；本金報酬率＝已實現損益 ÷ 起始本金（無限本金不適用）。');
+ lines.push('賣一半＝當下庫存約 50%；賣光／停損／獲利了結＝庫存歸零；歸零後完成一個操作輪次。');
+ lines.push('目前未計入手續費、交易稅、滑價、股利與公司行動。');
  lines.push('');
  lines.push('【月份結算】');
  months.forEach(m=>lines.push(m.month+'｜'+fmt(m.pnl)+'｜'+(m.cost?(m.pnl/m.cost*100).toFixed(2):'0.00')+'%｜'+m.rounds+'輪'));
