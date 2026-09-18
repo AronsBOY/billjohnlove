@@ -36,7 +36,7 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
       <p class="text-slate-500 text-xs font-bold">交易指令</p><div id="kSig" class="text-3xl font-black mt-1">0</div>
     </div>
     <div class="bg-white rounded-2xl p-4 shadow-lg border-2 border-yellow-200">
-      <p class="text-slate-500 text-xs font-bold">待人工覆核</p><div id="kReview" class="text-3xl font-black mt-1 text-orange-600">0</div>
+      <p class="text-slate-500 text-xs font-bold">真正待人工</p><div id="kReview" class="text-3xl font-black mt-1 text-orange-600">0</div>
     </div>
     <div class="bg-white rounded-2xl p-4 shadow-lg border-2 border-yellow-200">
       <p class="text-slate-500 text-xs font-bold">價格基準</p><div class="text-lg font-black mt-2">當日收盤價</div>
@@ -72,7 +72,7 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
     <div id="panel-review" class="panel hidden mt-5">
       <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div class="p-5 border-b flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div><h3 class="font-black text-lg">人工覆核佇列</h3><p class="text-sm text-slate-500">必檢：賣半／賣光／停損／換股／條件句／多股票訊息；另加一般指令抽樣。</p></div>
+          <div><h3 class="font-black text-lg">人工覆核佇列</h3><p class="text-sm text-slate-500">系統會先做第一次語意裁決；只有更正、同股衝突動作、減碼數量不明等真正不確定案例才交給你。</p></div>
           <div class="text-sm font-bold"><span id="reviewDone">0</span> / <span id="reviewTotal">0</span> 已確認</div>
         </div>
         <div id="reviewList" class="divide-y max-h-[65vh] overflow-y-auto"></div>
@@ -235,14 +235,36 @@ function parseLine(text){
  flush();return out;
 }
 const RX={
- buy:/建立基本持股|建立回基本持股|建立第一次(?:基本)?持股|建立持股|開始佈局|先建立|買進|進場|直接加碼|可以加碼|可加碼|再度加碼|同樣.*加碼|平盤下加碼|跌停.*加碼|酌量加碼/,
- half:/獲利一半|賣一半|減碼一半|獲利減碼一半|順勢.*一半/,
- sell:/全數獲利了結|全數.*(?:獲利)?了結|獲利了結|停損賣出|停損出場|小賠停損|停損|出清|賣光|資金收回/,
- noBuy:/不用加碼|不必加碼|先不加碼|還不用加碼|目前先不必|沒到價|沒有.*可買|就不必出手|先不用動作|今天沒有動作|沒有動作/,
- hold:/續抱|持股都續抱|先持股續抱|自行處理|等候通知|靜待/,
+ buy:/建立基本持股|建立持股|建立第一次(?:基本)?持股|開始佈局|分批佈局|可以加碼|可加碼|直接加碼|再度加碼|酌量加碼|平盤下加碼|跌停(?:附近)?(?:可|可以)?加碼|買進|買回|買一些回來|先買一些回來|進場/,
+ half:/先?獲利一半|賣一半|減碼一半|獲利減碼一半|順勢獲利一半/,
+ sell:/全數獲利了結|全數(?:獲利)?出清|全數賣出|獲利了結|小賺獲利出清|停損賣出|停損出場|小賠停損|建議停損|停損|資金收回|出清|賣光|股票賣出/,
+ vagueReduce:/減碼|獲利調節|賣一些|出一點|獲利一些/,
  convert:/轉進|轉入|轉去|轉換|換股|換過去|換到/,
- condition:/新進會員|新會員|沒有持股|沒持股|有持股.*不用加碼|有持股.*不必加碼|沒加碼過|加碼過.*不必加碼/
+ discretionary:/看自己決定|自由決定|要不要都買|想轉去|想轉入|都可以|有機會再|會找機會|之後再|再來加碼|等.*再/,
+ conditionNoPosition:/新進會員|新會員|沒有持股|沒持股|沒成交的/,
+ noAdd:/有持股.*不用加碼|有持股.*不必加碼|有持股的還不用加碼/,
+ noAction:/續抱|持股都續抱|先持股續抱|先不用加碼|還不用加碼|目前先不必|沒到價|就不必出手|先不用動作|今天沒有動作|沒有動作|靜待/,
+ historicalLead:/已經|之前|前面|早就/
 };
+
+function collectActionHits(sentence, regex, type){
+ const r=new RegExp(regex.source, regex.flags.includes('g')?regex.flags:regex.flags+'g');
+ const hits=[];let m;
+ while((m=r.exec(sentence))){
+   const before=sentence.slice(Math.max(0,m.index-18),m.index);
+   const after=sentence.slice(m.index+m[0].length,m.index+m[0].length+12);
+   const historical=RX.historicalLead.test(before) || /掉了|完了|過了|下車了/.test(after) || (type==='buy' && /^的/.test(after));
+   if(!historical) hits.push({type,index:m.index,len:m[0].length,text:m[0]});
+   if(m[0].length===0)r.lastIndex++;
+ }
+ return hits;
+}
+function distanceToStock(hit,stock){
+ const stockEnd=stock.index+stock.full.length;
+ if(hit.index>=stockEnd)return hit.index-stockEnd;
+ if(hit.index+hit.len<=stock.index)return stock.index-(hit.index+hit.len);
+ return 0;
+}
 function cleanStockName(name){
  return String(name||'')
   .replace(/^(進階組[:：]?|基本組[:：]?|今天|昨天|新進會員|新會員|手上沒有|沒有|持有|利用|跌停附近的|平盤下的|我們家的|我們家|光看|除了|以及|然後|至於|進場)+/g,'')
@@ -252,59 +274,77 @@ function cleanStockName(name){
 }
 function extractStocks(sentence){
  const re=/([^\s，。；：:、]{1,18})\s*[（(](\d{4})[）)]/g;let m,arr=[];
- while((m=re.exec(sentence)))arr.push({code:m[2],name:cleanStockName(m[1]),index:m.index});
+ while((m=re.exec(sentence)))arr.push({code:m[2],name:cleanStockName(m[1]),index:m.index,full:m[0]});
  return arr;
 }
-function actionTypes(text){
- const types=[];if(RX.half.test(text))types.push('half');if(RX.sell.test(text))types.push('sell');if(RX.buy.test(text)&&!RX.noBuy.test(text))types.push('buy');return [...new Set(types)];
+function inferCondition(sentence){
+ if(/沒加碼過第二次|沒有加碼過第二次/.test(sentence))return 'if_add_count_lt_2';
+ if(/沒加碼過的|沒有加碼過/.test(sentence))return 'if_position_no_add';
+ if(RX.conditionNoPosition.test(sentence)&&/建立|持股/.test(sentence))return 'if_no_position';
+ return 'always';
 }
-function nearestAction(sentence,stockIndex){
- const hits=[];const defs=[
-   ['half',/獲利一半|賣一半|減碼一半|獲利減碼一半|順勢.*一半/g],
-   ['sell',/全數獲利了結|全數.*?(?:獲利)?了結|獲利了結|停損賣出|停損出場|小賠停損|停損|出清|賣光|資金收回/g],
-   ['buy',/建立基本持股|建立回基本持股|建立第一次(?:基本)?持股|建立持股|開始佈局|先建立|買進|進場|直接加碼|可以加碼|可加碼|再度加碼|酌量加碼/g]
- ];
- defs.forEach(([type,re])=>{let m;while((m=re.exec(sentence)))hits.push({type,index:m.index,dist:Math.abs(m.index-stockIndex)});});
- hits.sort((a,b)=>a.dist-b.dist);return hits[0]?hits[0].type:null;
+function classifyStock(sentence,stock,stockCount){
+ const hits=[
+   ...collectActionHits(sentence,RX.half,'half'),
+   ...collectActionHits(sentence,RX.sell,'sell'),
+   ...collectActionHits(sentence,RX.buy,'buy')
+ ].map(h=>({...h,dist:distanceToStock(h,stock)})).filter(h=>h.dist<=60).sort((a,b)=>a.dist-b.dist||a.index-b.index);
+ const local=sentence.slice(Math.max(0,stock.index-55),Math.min(sentence.length,stock.index+stock.full.length+80));
+ let action='忽略',qtyRule='',reason=[],confidence=.96,condition=inferCondition(local);
+ if(hits.length){
+   const nearest=hits[0];
+   const competing=hits.filter(h=>h.type!==nearest.type&&Math.abs(h.dist-nearest.dist)<=10);
+   if(competing.length){
+     reason.push('同股同句多重動作');confidence=.35;
+   }else if(nearest.type==='half'){
+     action='賣出';qtyRule='half';reason.push('明確賣一半');
+   }else if(nearest.type==='sell'){
+     action='賣出';qtyRule='all';reason.push('明確出場');
+   }else if(nearest.type==='buy'){
+     const discretionary=RX.discretionary.test(local) && !/建立(?:基本)?持股|先買一些回來|買回/.test(local);
+     if(discretionary){reason.push('選擇性建議，非明確執行');confidence=.9;}
+     else {action='買入';qtyRule='one_lot';reason.push('明確買入/加碼');}
+   }
+ }else{
+   if(RX.vagueReduce.test(local) && !RX.half.test(local) && !RX.sell.test(local)){
+     action='賣出';qtyRule='unknown';reason.push('減碼數量不明');confidence=.3;
+   }else if(RX.convert.test(local)){
+     reason.push('單純轉換建議，不視為交易');
+   }else if(RX.noAction.test(local)){
+     reason.push('續抱/等待/不動作');
+   }else{
+     reason.push('沒有明確執行動作');
+   }
+ }
+ if(condition!=='always'){
+   reason.push(condition==='if_no_position'?'明確條件：無持股才建立':condition==='if_position_no_add'?'明確條件：已有持股且尚未加碼': '明確條件：加碼次數未滿2次');
+ }
+ if(stockCount>1 && action!=='忽略')reason.push('同句多股票但動作一致可自動判定');
+ return {action,qtyRule,reason:reason.join('、'),confidence,condition};
 }
 function classifyText(m){
  const raw=m.text.trim();
- // 用「句」而不是整則訊息判斷，避免 A 股票的賣出動作污染到同訊息內 B 股票。
  const sentences=raw.split(/(?<=[。！？!?；;])|\n+/).map(x=>x.trim()).filter(Boolean);
  const rows=[];let serial=0;
  for(const sentence of sentences){
    const stocks=extractStocks(sentence);if(!stocks.length)continue;
-   const types=actionTypes(sentence);
-   const mixed=types.length>1;
+   const seen=new Set();
    stocks.forEach(st=>{
-     let t=types.length===1?types[0]:(mixed?nearestAction(sentence,st.index):null);
-     let action='忽略',qtyRule='',reason=[],confidence=.92,condition='always';
-     if(t==='half'){action='賣出';qtyRule='half';reason.push('部分賣出');}
-     else if(t==='sell'){action='賣出';qtyRule='all';reason.push('完整出場');}
-     else if(t==='buy'){action='買入';qtyRule='one_lot';reason.push('明確買入/加碼');}
-     else reason.push('沒有明確執行動作');
-     if(RX.noBuy.test(sentence)&&action==='買入'){action='忽略';qtyRule='';reason.push('含否定買入語意');confidence=.7;}
-     if(RX.condition.test(sentence)){
-       reason.push('持股/會員條件句');confidence=Math.min(confidence,.78);
-       if(/沒有持股|沒持股|新進會員|新會員/.test(sentence)&&!/舊會員|有持股.*加碼|仍能.*加碼/.test(sentence))condition='if_no_position';
-     }
-     if(RX.convert.test(sentence)){reason.push('換股語意');confidence=Math.min(confidence,.72);}
-     if(mixed){reason.push('同句混合買賣語意');confidence=Math.min(confidence,.65);}
-     if(stocks.length>1){reason.push('同句多股票');confidence=Math.min(confidence,.8);}
+     const parsed=classifyStock(sentence,st,stocks.length);
+     const key=st.code+'|'+parsed.action+'|'+parsed.qtyRule+'|'+parsed.condition;
+     if(seen.has(key))return;seen.add(key);
      const pm=sentence.match(/(\d+(?:\.\d+)?)\s*[-~到]\s*(\d+(?:\.\d+)?)/);
-     rows.push({id:m.date+'-'+m.time+'-'+st.code+'-'+(++serial),date:m.date,time:m.time,code:st.code,name:st.name,action,qtyRule,condition,suggested:pm?pm[1]+'-'+pm[2]:'',raw:sentence,reason:reason.join('、'),confidence});
+     rows.push({id:m.date+'-'+m.time+'-'+st.code+'-'+(++serial),date:m.date,time:m.time,code:st.code,name:st.name,action:parsed.action,qtyRule:parsed.qtyRule,condition:parsed.condition,suggested:pm?pm[1]+'-'+pm[2]:'',raw:sentence,reason:parsed.reason,confidence:parsed.confidence});
    });
  }
- // 更正訊息可能只有裸代號，保留成覆核項，避免 6781/6788 這類修正消失。
- if(/更正|打太快|沒有要買/.test(raw)){
+ if(/更正|修正|打太快|沒有要買/.test(raw)){
    const bare=raw.match(/(?:更正|修正)\s*(\d{4})/);
-   if(bare&&!rows.some(r=>r.code===bare[1]))rows.push({id:m.date+'-'+m.time+'-correction-'+bare[1],date:m.date,time:m.time,code:bare[1],name:'',action:'忽略',qtyRule:'',condition:'manual',suggested:'',raw,reason:'更正訊息：請人工確認前一筆代號或動作',confidence:.2});
+   if(bare)rows.push({id:m.date+'-'+m.time+'-correction-'+bare[1],date:m.date,time:m.time,code:bare[1],name:'',action:'忽略',qtyRule:'',condition:'manual',suggested:'',raw,reason:'更正訊息：需要確認前一筆錯誤代號/動作如何修正',confidence:.1});
  }
  return rows;
 }
-function hash(x){let h=0;for(let i=0;i<x.length;i++)h=((h<<5)-h)+x.charCodeAt(i)|0;return h}
 function forceReview(s){
- return s.action==='賣出'||s.confidence<.85||/條件句|換股語意|同句多股票|混合買賣|更正訊息/.test(s.reason)||Math.abs(hash(s.id))%20===0;
+ return s.confidence<.5 || /更正訊息|同股同句多重動作|減碼數量不明/.test(s.reason);
 }
 function renderReview(){
  const box=document.getElementById('reviewList');box.innerHTML='';S.review.forEach(s=>{
