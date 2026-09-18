@@ -278,6 +278,25 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
         <div class="p-5 border-b border-slate-700"><h3 class="font-black text-yellow-300">期末未結算部位</h3><p class="text-xs text-slate-300">這裡列出回測截止日仍未歸零的部位。若你知道某檔其實已經賣掉，代表可能漏抓賣出指令，可直接在該卡片做人工查漏覆核。</p></div>
         <div id="openPositions" class="grid md:grid-cols-2 lg:grid-cols-3 gap-3 p-5"></div>
       </div>
+
+      <div class="bg-white rounded-2xl border-4 border-yellow-300 shadow-xl overflow-hidden">
+        <div class="p-5 border-b bg-gradient-to-r from-yellow-50 to-orange-50">
+          <div class="flex flex-col md:flex-row md:items-end justify-between gap-2">
+            <div><h3 class="font-black text-xl">代表作｜股票績效 Top 5</h3><p class="text-xs text-slate-500 mt-1">以已完成結算輪次彙總同一檔股票；依實際已實現損益排序，同時顯示金額與報酬率。</p></div>
+            <span id="representativeModeLabel" class="text-xs bg-slate-900 text-yellow-300 px-3 py-1.5 rounded-full font-black">有限本金</span>
+          </div>
+        </div>
+        <div class="grid lg:grid-cols-2 gap-0 lg:divide-x">
+          <div class="p-5">
+            <div class="flex items-center justify-between mb-4"><h4 class="font-black text-red-600">🏆 獲利代表作 Top 5</h4><span class="text-[11px] text-slate-400">依獲利金額排序</span></div>
+            <div id="profitRepresentatives" class="space-y-4"></div>
+          </div>
+          <div class="p-5 border-t lg:border-t-0">
+            <div class="flex items-center justify-between mb-4"><h4 class="font-black text-green-700">🛡️ 停損代表作 Top 5</h4><span class="text-[11px] text-slate-400">依虧損金額排序</span></div>
+            <div id="lossRepresentatives" class="space-y-4"></div>
+          </div>
+        </div>
+      </div>
       </div>
     </div>
   </section>
@@ -970,6 +989,42 @@ function renderOpenPositions(result){
    try{await applyMissedExit(b.dataset.missedExit,rule);}finally{b.disabled=false;}
  }));
 }
+
+function representativeWorks(result){
+ const map={};
+ (result.rounds||[]).forEach(r=>{
+   if(!map[r.code])map[r.code]={code:r.code,name:cleanStockName(r.name||''),pnl:0,cost:0,rounds:0};
+   const x=map[r.code];x.pnl+=Number(r.pnl)||0;x.cost+=Number(r.buyCost)||0;x.rounds++;
+   if(!x.name)x.name=cleanStockName(r.name||'');
+ });
+ return Object.values(map).map(x=>({...x,pct:x.cost?x.pnl/x.cost*100:0}));
+}
+function representativeRow(x,maxAbs,rank,type){
+ const positive=type==='profit';
+ const width=maxAbs?Math.max(4,Math.abs(x.pnl)/maxAbs*100):0;
+ const money=(x.pnl>=0?'+':'')+fmt(x.pnl);
+ const pct=(x.pct>=0?'+':'')+x.pct.toFixed(2)+'%';
+ return '<div class="rounded-xl border border-slate-200 p-3 bg-white">'+
+   '<div class="flex items-center justify-between gap-3">'+
+     '<div class="min-w-0"><div class="flex items-center gap-2"><span class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black '+(positive?'bg-red-100 text-red-700':'bg-green-100 text-green-700')+'">'+rank+'</span><b class="truncate">'+escapeHtml(x.code)+' '+escapeHtml(x.name||'')+'</b></div><div class="text-[11px] text-slate-400 mt-1 ml-8">'+x.rounds+' 個完整操作輪次</div></div>'+
+     '<div class="text-right shrink-0"><div class="font-black '+(positive?'text-red-600':'text-green-700')+'">'+money+'</div><div class="text-xs font-black '+(positive?'text-red-500':'text-green-600')+'">'+pct+'</div></div>'+
+   '</div>'+
+   '<div class="h-3 bg-slate-100 rounded-full overflow-hidden mt-3"><div class="h-full rounded-full '+(positive?'bg-red-500':'bg-green-600')+'" style="width:'+width.toFixed(1)+'%"></div></div>'+
+ '</div>';
+}
+function renderRepresentativeWorks(result,mode){
+ const all=representativeWorks(result);
+ const profits=all.filter(x=>x.pnl>0).sort((a,b)=>b.pnl-a.pnl).slice(0,5);
+ const losses=all.filter(x=>x.pnl<0).sort((a,b)=>a.pnl-b.pnl).slice(0,5);
+ const pMax=Math.max(0,...profits.map(x=>Math.abs(x.pnl)));
+ const lMax=Math.max(0,...losses.map(x=>Math.abs(x.pnl)));
+ const pBox=document.getElementById('profitRepresentatives');
+ const lBox=document.getElementById('lossRepresentatives');
+ const modeLabel=document.getElementById('representativeModeLabel');
+ if(modeLabel)modeLabel.textContent=mode==='finite'?'有限本金':'無限本金';
+ if(pBox)pBox.innerHTML=profits.map((x,i)=>representativeRow(x,pMax,i+1,'profit')).join('')||'<div class="text-center text-slate-400 py-8 text-sm">目前沒有已結算獲利股票</div>';
+ if(lBox)lBox.innerHTML=losses.map((x,i)=>representativeRow(x,lMax,i+1,'loss')).join('')||'<div class="text-center text-slate-400 py-8 text-sm">目前沒有已結算虧損股票</div>';
+}
 function renderSettlementMode(){
  if(!S.results)return;const mode=S.resultMode;const result=S.results[mode];const st=roundStats(result,mode);
  document.querySelectorAll('.result-mode').forEach(b=>{const on=b.dataset.resultMode===mode;b.className='result-mode px-3 py-2 rounded-lg text-xs font-black '+(on?'bg-orange-600 text-white':'text-slate-500')});
@@ -987,6 +1042,7 @@ function renderSettlementMode(){
  const skips=result.skipped||[];document.getElementById('skipList').innerHTML=skips.slice(0,120).map(s=>'<div class="p-4 text-sm flex justify-between gap-3"><div><b>'+s.date+' '+s.code+' '+s.name+'</b><div class="text-xs text-slate-400 mt-1">'+escapeHtml(s.raw)+'</div></div><span class="text-xs font-bold text-orange-600 shrink-0">'+s.reason+'</span></div>').join('')||'<div class="p-6 text-center text-slate-400">沒有未成交指令</div>';
  renderTradeLedger(result);
  renderOpenPositions(result);
+ renderRepresentativeWorks(result,mode);
  const mismatchCount=(result.positionMismatches||[]).length;
  const openBox=document.getElementById('openPositions');
  if(mismatchCount&&openBox){
@@ -1127,6 +1183,17 @@ function currentReportText(){
  lines.push('');
  lines.push('【每筆買賣明細】');
  (result.ledger||[]).forEach(r=>lines.push(r.date+' '+(r.time||'')+'｜'+r.code+' '+r.name+'｜'+r.action+'｜成交 '+Number(r.price).toFixed(2)+'｜'+r.qty+'股｜成本 '+Number(r.costPrice||0).toFixed(2)+'｜金額 '+fmt(r.amount)+'｜損益 '+(r.action==='賣出'?fmt(r.realizedPnl):'-')));
+ lines.push('');
+ lines.push('【代表作｜股票績效 Top 5】');
+ const reps=representativeWorks(result);
+ const pReps=reps.filter(x=>x.pnl>0).sort((a,b)=>b.pnl-a.pnl).slice(0,5);
+ const lReps=reps.filter(x=>x.pnl<0).sort((a,b)=>a.pnl-b.pnl).slice(0,5);
+ lines.push('獲利代表作：');
+ if(!pReps.length)lines.push('無');
+ pReps.forEach((x,i)=>lines.push((i+1)+'. '+x.code+' '+x.name+'｜'+(x.pnl>=0?'+':'')+fmt(x.pnl)+'｜'+(x.pct>=0?'+':'')+x.pct.toFixed(2)+'%'));
+ lines.push('停損代表作：');
+ if(!lReps.length)lines.push('無');
+ lReps.forEach((x,i)=>lines.push((i+1)+'. '+x.code+' '+x.name+'｜'+fmt(x.pnl)+'｜'+x.pct.toFixed(2)+'%'));
  lines.push('');
  lines.push('【期末未結算部位】');
  if(!opens.length)lines.push('無');
