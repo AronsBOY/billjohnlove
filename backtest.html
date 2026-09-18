@@ -262,7 +262,7 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
 </main>
 
 <script>
-const S={raw:'',sourceName:'',messages:[],signals:[],review:[],decisions:{},prices:new Map(),results:null,resultMode:'finite',startingCapital:5000000,tradeOverrides:{},editingTradeId:null,tradeFilter:''};
+const S={raw:'',sourceName:'',messages:[],signals:[],review:[],reviewConfirmed:{},decisions:{},prices:new Map(),results:null,resultMode:'finite',startingCapital:5000000,tradeOverrides:{},editingTradeId:null,tradeFilter:''};
 const fmt=n=>'$'+Math.round(n||0).toLocaleString('zh-TW');
 const dateNorm=s=>String(s||'').replace(/\./g,'-').replace(/\//g,'-');
 function showTab(name){
@@ -274,8 +274,8 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>show
 document.getElementById('fileInput').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;S.sourceName=f.name||'';S.raw=await f.text();document.getElementById('parseBtn').disabled=false;});
 
 function parseLine(text){
- const lines=text.split(/\r?\n/),out=[];let date='',cur=null;
- const flush=()=>{if(cur&&cur.text.trim())out.push(cur);cur=null};
+ const lines=text.split(/\r?\n/),out=[];let date='',cur=null,seq=0;
+ const flush=()=>{if(cur&&cur.text.trim()){cur.sourceId='msg-'+(++seq)+'-'+cur.date+'-'+cur.time;out.push(cur)}cur=null};
  for(const line0 of lines){
    const line=line0.trimEnd();if(!line.trim())continue;
    const dm=line.match(/^(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})/);
@@ -298,7 +298,8 @@ function parseLine(text){
  flush();return out;
 }
 const RX={
- buy:/建立基本持股|建立持股|建立第一次(?:基本)?持股|開始佈局|分批佈局|可以加碼|可加碼|直接加碼|再度加碼|酌量加碼|平盤下加碼|跌停(?:附近)?(?:可|可以)?加碼|買進|買回|買一些回來|先買一些回來|進場/,
+ buy:/建立基本持股|建立持股|建立第一次(?:基本)?持股|開始佈局|分批佈局|可以加碼|可加碼|直接加碼|再度加碼|酌量加碼|平盤下加碼|跌停(?:附近)?(?:可|可以)?加碼|買進|買回|買一些回來|先買一些回來|進場|再買|先買/,
+ buyHalf:/買一半|買進一半|買回一半|建立一半|半部位/,
  half:/先?獲利一半|賣一半|減碼一半|獲利減碼一半|順勢獲利一半/,
  sell:/全數獲利了結|全數(?:獲利)?出清|全數賣出|獲利了結|小賺獲利出清|停損賣出|停損出場|小賠停損|建議停損|停損|資金收回|出清|賣光|股票賣出/,
  vagueReduce:/減碼|獲利調節|賣一些|出一點|獲利一些/,
@@ -354,6 +355,9 @@ function classifyStock(sentence,stock,stockCount){
  ].map(h=>({...h,dist:distanceToStock(h,stock)})).filter(h=>h.dist<=60).sort((a,b)=>a.dist-b.dist||a.index-b.index);
  const local=sentence.slice(Math.max(0,stock.index-55),Math.min(sentence.length,stock.index+stock.full.length+80));
  let action='忽略',qtyRule='',reason=[],confidence=.96,condition=inferCondition(local);
+ const before=sentence.slice(Math.max(0,stock.index-18),stock.index);
+ const after=sentence.slice(stock.index+stock.full.length,Math.min(sentence.length,stock.index+stock.full.length+18));
+ const explicitBuyHalf=(/買|買進|買回|再買|先買/.test(before) && /一半|半部位/.test(after)) || RX.buyHalf.test(local);
  if(hits.length){
    const nearest=hits[0];
    const competing=hits.filter(h=>h.type!==nearest.type&&Math.abs(h.dist-nearest.dist)<=10);
@@ -364,12 +368,14 @@ function classifyStock(sentence,stock,stockCount){
    }else if(nearest.type==='sell'){
      action='賣出';qtyRule='all';reason.push('明確出場');
    }else if(nearest.type==='buy'){
-     const discretionary=RX.discretionary.test(local) && !/建立(?:基本)?持股|先買一些回來|買回/.test(local);
+     const discretionary=RX.discretionary.test(local) && !/建立(?:基本)?持股|先買一些回來|買回|再買|先買/.test(local);
      if(discretionary){reason.push('選擇性建議，非明確執行');confidence=.9;}
-     else {action='買入';qtyRule='one_lot';reason.push('明確買入/加碼');}
+     else {action='買入';qtyRule=explicitBuyHalf?'half_buy':'one_lot';reason.push(explicitBuyHalf?'明確買入一半':'明確買入/加碼');}
    }
  }else{
-   if(RX.vagueReduce.test(local) && !RX.half.test(local) && !RX.sell.test(local)){
+   if(explicitBuyHalf){
+     action='買入';qtyRule='half_buy';reason.push('買入一半');
+   }else if(RX.vagueReduce.test(local) && !RX.half.test(local) && !RX.sell.test(local)){
      action='賣出';qtyRule='unknown';reason.push('減碼數量不明');confidence=.3;
    }else if(RX.convert.test(local)){
      reason.push('單純轉換建議，不視為交易');
@@ -382,7 +388,7 @@ function classifyStock(sentence,stock,stockCount){
  if(condition!=='always'){
    reason.push(condition==='if_no_position'?'明確條件：無持股才建立':condition==='if_position_no_add'?'明確條件：已有持股且尚未加碼': '明確條件：加碼次數未滿2次');
  }
- if(stockCount>1 && action!=='忽略')reason.push('同句多股票但動作一致可自動判定');
+ if(stockCount>1 && action!=='忽略')reason.push('同句多股票');
  return {action,qtyRule,reason:reason.join('、'),confidence,condition};
 }
 function classifyText(m){
@@ -394,32 +400,106 @@ function classifyText(m){
    const seen=new Set();
    stocks.forEach(st=>{
      const parsed=classifyStock(sentence,st,stocks.length);
-     const key=st.code+'|'+parsed.action+'|'+parsed.qtyRule+'|'+parsed.condition;
+     const key=st.code+'|'+parsed.action+'|'+parsed.qtyRule+'|'+parsed.condition+'|'+sentence;
      if(seen.has(key))return;seen.add(key);
      const pm=sentence.match(/(\d+(?:\.\d+)?)\s*[-~到]\s*(\d+(?:\.\d+)?)/);
-     rows.push({id:m.date+'-'+m.time+'-'+st.code+'-'+(++serial),date:m.date,time:m.time,code:st.code,name:st.name,action:parsed.action,qtyRule:parsed.qtyRule,condition:parsed.condition,suggested:pm?pm[1]+'-'+pm[2]:'',raw:sentence,reason:parsed.reason,confidence:parsed.confidence});
+     rows.push({id:m.sourceId+'-'+st.code+'-'+(++serial),sourceId:m.sourceId,sourceRaw:raw,date:m.date,time:m.time,code:st.code,name:st.name,action:parsed.action,qtyRule:parsed.qtyRule,condition:parsed.condition,suggested:pm?pm[1]+'-'+pm[2]:'',raw:sentence,reason:parsed.reason,confidence:parsed.confidence});
    });
  }
  if(/更正|修正|打太快|沒有要買/.test(raw)){
    const bare=raw.match(/(?:更正|修正)\s*(\d{4})/);
-   if(bare)rows.push({id:m.date+'-'+m.time+'-correction-'+bare[1],date:m.date,time:m.time,code:bare[1],name:'',action:'忽略',qtyRule:'',condition:'manual',suggested:'',raw,reason:'更正訊息：需要確認前一筆錯誤代號/動作如何修正',confidence:.1});
+   if(bare)rows.push({id:m.sourceId+'-correction-'+bare[1],sourceId:m.sourceId,sourceRaw:raw,date:m.date,time:m.time,code:bare[1],name:'',action:'忽略',qtyRule:'',condition:'manual',suggested:'',raw,reason:'更正訊息：需要確認前一筆錯誤代號/動作如何修正',confidence:.1});
  }
  return rows;
 }
-function forceReview(s){
- return s.confidence<.5 || /更正訊息|同股同句多重動作|減碼數量不明/.test(s.reason);
+function decisionValue(row){
+ if(row.action==='買入')return row.qtyRule==='half_buy'?'buy_half':'buy';
+ if(row.action==='賣出')return row.qtyRule==='half'?'sell_half':'sell_all';
+ return 'ignore';
+}
+function mixedSourceNeedsReview(rows){
+ const active=rows.filter(r=>r.action==='買入'||r.action==='賣出');
+ const actions=new Set(active.map(r=>r.action));
+ const raw=(rows[0]&&rows[0].sourceRaw)||'';
+ return active.length>=2 && actions.size>=2 && /先|再|轉|換|賣|買/.test(raw);
+}
+function buildReviewGroups(signals){
+ const by={};
+ signals.forEach(s=>{if(!by[s.sourceId])by[s.sourceId]=[];by[s.sourceId].push(s)});
+ const groups=[];
+ Object.values(by).forEach(rows=>{
+   const uncertain=rows.some(r=>r.confidence<.5||/更正訊息|同股同句多重動作|減碼數量不明/.test(r.reason));
+   const mixed=mixedSourceNeedsReview(rows);
+   if(!uncertain&&!mixed)return;
+
+   // 同一則老師指令只出現一次；同一股票若被重複偵測，合併成一列。
+   const stockMap=new Map();
+   rows.forEach(r=>{
+     const key=r.code||r.id;
+     if(!stockMap.has(key))stockMap.set(key,{...r,memberIds:[r.id],duplicateCount:1});
+     else{
+       const x=stockMap.get(key);x.memberIds.push(r.id);x.duplicateCount++;
+       if(x.action!==r.action||x.qtyRule!==r.qtyRule){
+         x.action='忽略';x.qtyRule='';x.reason=(x.reason?x.reason+'、':'')+'同一指令對同股出現衝突判定';
+       }
+     }
+   });
+   groups.push({
+     sourceId:rows[0].sourceId,
+     date:rows[0].date,time:rows[0].time,raw:rows[0].sourceRaw||rows[0].raw,
+     rows:Array.from(stockMap.values()),
+     mixed,uncertain
+   });
+ });
+ return groups.sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
+}
+function applyReviewChoice(row,value){
+ let d={action:'忽略',qtyRule:''};
+ if(value==='buy')d={action:'買入',qtyRule:'one_lot'};
+ if(value==='buy_half')d={action:'買入',qtyRule:'half_buy'};
+ if(value==='sell_half')d={action:'賣出',qtyRule:'half'};
+ if(value==='sell_all')d={action:'賣出',qtyRule:'all'};
+ (row.memberIds||[row.id]).forEach(id=>S.decisions[id]={...d});
 }
 function renderReview(){
- const box=document.getElementById('reviewList');box.innerHTML='';S.review.forEach(s=>{
-   const d=document.createElement('div');d.className='p-4 bg-white';d.dataset.id=s.id;
-   d.innerHTML='<div class="flex justify-between gap-3"><div><b>'+s.date+' '+s.time+'　'+s.code+' '+s.name+'</b><div class="text-xs text-slate-400 mt-1">系統：'+s.action+(s.qtyRule?' / '+s.qtyRule:'')+'｜'+s.reason+'</div></div><span class="state text-xs font-bold text-orange-600">待確認</span></div><div class="bg-slate-50 rounded-xl p-3 mt-3 text-sm leading-relaxed">'+escapeHtml(s.raw)+'</div><div class="flex gap-2 flex-wrap mt-3"><button data-v="ok" class="px-3 py-2 rounded-lg bg-emerald-100 text-emerald-700 font-bold text-xs">✓ 正確</button><button data-v="half" class="px-3 py-2 rounded-lg bg-blue-100 text-blue-700 font-bold text-xs">賣一半</button><button data-v="all" class="px-3 py-2 rounded-lg bg-blue-100 text-blue-700 font-bold text-xs">賣光</button><button data-v="buy" class="px-3 py-2 rounded-lg bg-red-100 text-red-700 font-bold text-xs">買入</button><button data-v="ignore" class="px-3 py-2 rounded-lg bg-slate-200 text-slate-700 font-bold text-xs">非指令</button></div>';
-   d.querySelectorAll('button').forEach(b=>b.onclick=()=>{const v=b.dataset.v;if(v==='ok')S.decisions[s.id]={};if(v==='half')S.decisions[s.id]={action:'賣出',qtyRule:'half'};if(v==='all')S.decisions[s.id]={action:'賣出',qtyRule:'all'};if(v==='buy')S.decisions[s.id]={action:'買入',qtyRule:'one_lot'};if(v==='ignore')S.decisions[s.id]={action:'忽略',qtyRule:''};d.querySelector('.state').textContent='已覆核';d.classList.add('review-selected');updateReviewDone()});box.appendChild(d);
- });document.getElementById('reviewTotal').textContent=S.review.length;updateReviewDone();
+ const box=document.getElementById('reviewList');box.innerHTML='';
+ S.review.forEach(g=>{
+   const d=document.createElement('div');d.className='p-5 bg-white';d.dataset.sourceId=g.sourceId;
+   const tag=g.mixed?'買賣混合指令':'語意不確定';
+   d.innerHTML=
+     '<div class="flex justify-between gap-3"><div><b>'+g.date+' '+g.time+'　'+tag+'</b><div class="text-xs text-slate-400 mt-1">同一則指令只覆核一次；每檔股票可分別決定買／賣／忽略。</div></div><span class="group-state text-xs font-bold text-orange-600">'+(S.reviewConfirmed[g.sourceId]?'已確認':'待確認')+'</span></div>'+
+     '<div class="bg-slate-50 rounded-xl p-3 mt-3 text-sm leading-relaxed">'+escapeHtml(g.raw)+'</div>'+
+     '<div class="mt-4 space-y-2">'+g.rows.map((r,i)=>{
+       const dup=r.duplicateCount>1?' <span class="text-[10px] bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full">已合併 '+r.duplicateCount+' 次偵測</span>':'';
+       return '<div class="grid grid-cols-1 md:grid-cols-[1fr_220px] gap-2 items-center border rounded-xl p-3 bg-white">'+
+         '<div><b>'+escapeHtml(r.code)+' '+escapeHtml(r.name||'')+'</b>'+dup+'<div class="text-xs text-slate-400 mt-1">系統初判：'+escapeHtml(r.action)+(r.qtyRule?' / '+escapeHtml(r.qtyRule):'')+'｜'+escapeHtml(r.reason||'')+'</div></div>'+
+         '<select data-review-choice="'+i+'" class="border rounded-xl px-3 py-2 font-bold text-sm">'+
+           '<option value="ignore" '+(decisionValue(r)==='ignore'?'selected':'')+'>不交易 / 忽略</option>'+
+           '<option value="buy" '+(decisionValue(r)==='buy'?'selected':'')+'>買入</option>'+
+           '<option value="buy_half" '+(decisionValue(r)==='buy_half'?'selected':'')+'>買入一半</option>'+
+           '<option value="sell_half" '+(decisionValue(r)==='sell_half'?'selected':'')+'>賣一半</option>'+
+           '<option value="sell_all" '+(decisionValue(r)==='sell_all'?'selected':'')+'>賣光</option>'+
+         '</select></div>';
+     }).join('')+'</div>'+
+     '<div class="mt-4 flex justify-end"><button type="button" class="confirm-group bg-orange-600 text-white px-5 py-2.5 rounded-xl font-black">確認這則指令</button></div>';
+   d.querySelector('.confirm-group').addEventListener('click',()=>{
+     g.rows.forEach((r,i)=>applyReviewChoice(r,d.querySelector('[data-review-choice="'+i+'"]').value));
+     S.reviewConfirmed[g.sourceId]=true;
+     d.querySelector('.group-state').textContent='已確認';
+     d.classList.add('review-selected');
+     updateReviewDone();updatePriceStats(priceRequests());
+   });
+   box.appendChild(d);
+ });
+ document.getElementById('reviewTotal').textContent=S.review.length;updateReviewDone();
 }
-function updateReviewDone(){document.getElementById('reviewDone').textContent=Object.keys(S.decisions).length}
+function updateReviewDone(){
+ const done=S.review.filter(g=>S.reviewConfirmed[g.sourceId]).length;
+ document.getElementById('reviewDone').textContent=done;
+}
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
 document.getElementById('parseBtn').onclick=()=>{
- S.messages=parseLine(S.raw);S.signals=S.messages.flatMap(classifyText);S.review=S.signals.filter(forceReview);S.decisions={};
+ S.messages=parseLine(S.raw);S.signals=S.messages.flatMap(classifyText);S.review=buildReviewGroups(S.signals);S.decisions={};S.reviewConfirmed={};
  document.getElementById('kMsg').textContent=S.messages.length;document.getElementById('kSig').textContent=S.signals.filter(x=>x.action==='買入'||x.action==='賣出').length;document.getElementById('kReview').textContent=S.review.length;renderReview();updatePriceStats(priceRequests());showTab('review');lucide.createIcons();
 };
 
@@ -472,7 +552,7 @@ function simulate(signals,{infinite,capital,allocation,maxStocks}){
      const newStock=p.qty<=0;
      if(!infinite&&newStock&&Object.values(pos).filter(x=>x.qty>0).length>=maxStocks){skipped.push({...s,reason:'已達同時持股上限'});continue}
      const avgBefore=p.qty>0?p.cost/p.qty:0;
-     let qty=Number.isFinite(Number(s.qty))&&Number(s.qty)>0?Math.floor(Number(s.qty)):(infinite?1000:buyQty(price,allocation));
+     let qty=Number.isFinite(Number(s.qty))&&Number(s.qty)>0?Math.floor(Number(s.qty)):(infinite?(s.qtyRule==='half_buy'?500:1000):buyQty(price,s.qtyRule==='half_buy'?allocation*0.5:allocation));
      let amt=qty*price;
      if(!infinite&&amt>cash&&!(Number.isFinite(Number(s.qty))&&Number(s.qty)>0)){qty=Math.floor(cash/price);amt=qty*price}
      if(qty<=0||(!infinite&&amt>cash)){skipped.push({...s,reason:'資金不足'});continue}
@@ -545,12 +625,16 @@ function openRows(result){
  return Object.entries(result.pos||{}).filter(([,p])=>p.qty>0).map(([code,p])=>({code,name:p.name||'',qty:p.qty,cost:p.cost,avg:p.qty?p.cost/p.qty:0})).sort((a,b)=>b.cost-a.cost);
 }
 function renderReviewHistory(){
- const box=document.getElementById('reviewHistory');const reviewed=S.review.filter(r=>Object.prototype.hasOwnProperty.call(S.decisions,r.id));
- box.innerHTML=reviewed.map(r=>{const d=S.decisions[r.id]||{};const finalAction=d.action||r.action;const finalQty=d.qtyRule||r.qtyRule;const changed=!!(d.action||d.qtyRule);
- return '<div class="p-4 text-sm"><div class="flex justify-between gap-3"><b>'+r.date+' '+r.code+' '+r.name+'</b><span class="text-xs font-black '+(finalAction==='忽略'?'text-slate-500':changed?'text-blue-600':'text-emerald-600')+'">'+(finalAction==='忽略'?'已排除':changed?'已修改':'確認正確')+'</span></div><div class="text-xs text-slate-500 mt-1">原判定：'+r.action+(r.qtyRule?' / '+r.qtyRule:'')+' → 最終：'+finalAction+(finalQty?' / '+finalQty:'')+'</div><div class="text-xs text-slate-400 mt-1">'+escapeHtml(r.raw)+'</div></div>';
+ const box=document.getElementById('reviewHistory');
+ const groups=S.review.filter(g=>S.reviewConfirmed[g.sourceId]);
+ box.innerHTML=groups.map(g=>{
+   const rows=g.rows.map(r=>{
+     const id=(r.memberIds||[r.id])[0],d=S.decisions[id]||{},finalAction=d.action||r.action,finalQty=d.qtyRule||r.qtyRule;
+     return '<div class="mt-1">'+escapeHtml(r.code)+' '+escapeHtml(r.name||'')+'：'+escapeHtml(finalAction)+(finalQty?' / '+escapeHtml(finalQty):'')+'</div>';
+   }).join('');
+   return '<div class="p-4 text-sm"><div class="flex justify-between gap-3"><b>'+g.date+' '+g.time+'</b><span class="text-xs font-black text-emerald-600">已確認</span></div><div class="text-xs text-slate-400 mt-1">'+escapeHtml(g.raw)+'</div><div class="text-xs text-slate-600 mt-2">'+rows+'</div></div>';
  }).join('')||'<div class="p-6 text-center text-slate-400">尚無人工覆核紀錄</div>';
 }
-
 function tradeNumber(v,d=2){const n=Number(v);return Number.isFinite(n)?n.toLocaleString('zh-TW',{minimumFractionDigits:0,maximumFractionDigits:d}):'-'}
 function renderTradeLedger(result){
  const box=document.getElementById('tradeLedger');if(!box)return;
@@ -674,6 +758,7 @@ function snapshotData(label){
    },
    results:S.results,
    tradeOverrides:S.tradeOverrides,
+   reviewConfirmed:S.reviewConfirmed,
    signals:S.signals,
    prices:Array.from(S.prices.entries())
  };
@@ -701,7 +786,8 @@ function loadSnapshot(snap){
  S.resultMode=snap.resultMode||'finite';
  S.sourceName=snap.sourceName||'';
  S.tradeOverrides=snap.tradeOverrides||{};
- if(Array.isArray(snap.signals))S.signals=snap.signals;
+ S.reviewConfirmed=snap.reviewConfirmed||{};
+ if(Array.isArray(snap.signals)){S.signals=snap.signals;S.review=buildReviewGroups(S.signals);}
  if(Array.isArray(snap.prices))S.prices=new Map(snap.prices);
  document.getElementById('capitalInput').value=S.startingCapital;
  if(snap.settings){
