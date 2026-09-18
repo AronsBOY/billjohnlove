@@ -109,30 +109,97 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
     </div>
 
     <div id="panel-result" class="panel hidden mt-5 space-y-5">
-      <div class="grid md:grid-cols-2 gap-5">
-        <div class="bg-gradient-to-br from-yellow-100 to-orange-100 rounded-2xl p-5 border-4 border-yellow-300 shadow-lg">
-          <p class="text-xs font-black text-slate-500">有限本金</p><div id="finitePnl" class="text-3xl font-black mt-1">$0</div>
-          <div class="grid grid-cols-2 gap-3 mt-4 text-sm"><div><span class="text-slate-500">期末現金</span><b id="finiteCash" class="block">$0</b></div><div><span class="text-slate-500">資金不足</span><b id="finiteSkip" class="block">0</b></div></div>
+      <div>
+        <div class="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <h2 class="text-xl font-black">結算總覽</h2>
+            <p class="text-sm text-slate-500">只把「持股歸零」的完整操作週期列入結算；期末仍持有的部位另外放在最下方。</p>
+          </div>
+          <div class="flex bg-white rounded-xl p-1 border border-yellow-200 shadow-sm">
+            <button data-result-mode="finite" class="result-mode bg-orange-600 text-white px-3 py-2 rounded-lg text-xs font-black">有限本金</button>
+            <button data-result-mode="infinite" class="result-mode text-slate-500 px-3 py-2 rounded-lg text-xs font-black">無限本金</button>
+          </div>
         </div>
-        <div class="bg-white rounded-2xl p-5 border-2 border-yellow-200 shadow-lg">
-          <p class="text-xs font-black text-slate-500">無限本金</p><div id="infinitePnl" class="text-3xl font-black mt-1">$0</div>
-          <div class="grid grid-cols-2 gap-3 mt-4 text-sm"><div><span class="text-slate-500">完成輪次</span><b id="infiniteRounds" class="block">0</b></div><div><span class="text-slate-500">有效交易</span><b id="infiniteTrades" class="block">0</b></div></div>
+
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div class="bg-gradient-to-br from-yellow-100 to-orange-100 rounded-2xl p-4 border-4 border-yellow-300 shadow-lg">
+            <p class="text-xs font-black text-slate-500">已實現損益</p><div id="summaryPnl" class="text-2xl font-black mt-1">$0</div>
+          </div>
+          <div class="bg-white rounded-2xl p-4 border-2 border-yellow-200 shadow">
+            <p class="text-xs font-black text-slate-500">結算報酬率</p><div id="summaryReturn" class="text-2xl font-black mt-1">0%</div>
+          </div>
+          <div class="bg-white rounded-2xl p-4 border-2 border-yellow-200 shadow">
+            <p class="text-xs font-black text-slate-500">勝率</p><div id="summaryWinRate" class="text-2xl font-black mt-1">0%</div>
+          </div>
+          <div class="bg-white rounded-2xl p-4 border-2 border-yellow-200 shadow">
+            <p class="text-xs font-black text-slate-500">完整操作輪次</p><div id="summaryRounds" class="text-2xl font-black mt-1">0</div>
+          </div>
+          <div class="bg-white rounded-2xl p-4 border-2 border-yellow-200 shadow">
+            <p class="text-xs font-black text-slate-500">未成交指令</p><div id="summarySkipped" class="text-2xl font-black mt-1 text-orange-600">0</div>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4 mt-4">
+          <div class="bg-white rounded-2xl p-4 border border-slate-200">
+            <div class="text-xs font-black text-slate-400">有限本金</div>
+            <div class="grid grid-cols-3 gap-3 mt-2 text-sm">
+              <div><span class="text-slate-400">起始本金</span><b id="finiteStart" class="block mt-1">$0</b></div>
+              <div><span class="text-slate-400">期末現金</span><b id="finiteCash" class="block mt-1">$0</b></div>
+              <div><span class="text-slate-400">已實現</span><b id="finitePnl" class="block mt-1">$0</b></div>
+            </div>
+          </div>
+          <div class="bg-white rounded-2xl p-4 border border-slate-200">
+            <div class="text-xs font-black text-slate-400">無限本金</div>
+            <div class="grid grid-cols-3 gap-3 mt-2 text-sm">
+              <div><span class="text-slate-400">有效交易</span><b id="infiniteTrades" class="block mt-1">0</b></div>
+              <div><span class="text-slate-400">完整輪次</span><b id="infiniteRounds" class="block mt-1">0</b></div>
+              <div><span class="text-slate-400">已實現</span><b id="infinitePnl" class="block mt-1">$0</b></div>
+            </div>
+          </div>
         </div>
       </div>
+
       <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div class="p-5 border-b"><h3 class="font-black">操作輪次</h3><p class="text-xs text-slate-500">持股歸零 = 一輪完成；之後重新買入 = 新一輪。</p></div>
-        <div class="overflow-x-auto"><table class="w-full text-sm"><thead class="bg-slate-50"><tr><th class="p-3 text-left">模式</th><th class="p-3 text-left">股票</th><th class="p-3 text-left">開始</th><th class="p-3 text-left">結束</th><th class="p-3 text-right">損益</th><th class="p-3 text-right">%</th></tr></thead><tbody id="roundTable"></tbody></table></div>
+        <div class="p-5 border-b flex items-center justify-between">
+          <div><h3 class="font-black">月份結算</h3><p class="text-xs text-slate-500">依「最後賣光日」歸入該月；當月沒有完成操作就不顯示。</p></div>
+          <span id="monthModeLabel" class="text-xs bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full font-black">有限本金</span>
+        </div>
+        <div id="monthCards" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 p-5"></div>
       </div>
+
       <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div class="p-5 border-b"><h3 class="font-black">有限本金未成交指令</h3></div>
+        <div class="p-5 border-b"><h3 class="font-black">個股結算｜完整操作輪次</h3><p class="text-xs text-slate-500">同一檔股票賣光後重新買入，會自動開始第 2 輪、第 3 輪。</p></div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50"><tr>
+              <th class="p-3 text-left">股票</th><th class="p-3 text-center">輪次</th><th class="p-3 text-left">開始</th><th class="p-3 text-left">結束</th>
+              <th class="p-3 text-right">投入成本</th><th class="p-3 text-right">損益</th><th class="p-3 text-right">報酬率</th>
+            </tr></thead>
+            <tbody id="roundTable"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-5 border-b"><h3 class="font-black">未成交指令</h3><p class="text-xs text-slate-500">有限本金模式會特別列出資金不足、超過持股上限、無持股可賣與缺少收盤價。</p></div>
         <div id="skipList" class="divide-y"></div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="p-5 border-b"><h3 class="font-black">人工覆核紀錄</h3><p class="text-xs text-slate-500">保留哪些訊號被人工確認、修改或排除，方便之後回頭查核。</p></div>
+        <div id="reviewHistory" class="divide-y max-h-[420px] overflow-y-auto"></div>
+      </div>
+
+      <div class="bg-slate-900 text-white rounded-2xl border-4 border-yellow-300 shadow-xl overflow-hidden">
+        <div class="p-5 border-b border-slate-700"><h3 class="font-black text-yellow-300">期末未結算部位</h3><p class="text-xs text-slate-300">這裡不是「持有庫存主頁」，只是交代回測截止日仍未賣光、因此尚未納入結算的資金。</p></div>
+        <div id="openPositions" class="grid md:grid-cols-2 lg:grid-cols-3 gap-3 p-5"></div>
       </div>
     </div>
   </section>
 </main>
 
 <script>
-const S={raw:'',messages:[],signals:[],review:[],decisions:{},prices:new Map(),results:null};
+const S={raw:'',messages:[],signals:[],review:[],decisions:{},prices:new Map(),results:null,resultMode:'finite',startingCapital:5000000};
 const fmt=n=>'$'+Math.round(n||0).toLocaleString('zh-TW');
 const dateNorm=s=>String(s||'').replace(/\./g,'-').replace(/\//g,'-');
 function showTab(name){
@@ -281,13 +348,55 @@ document.getElementById('runBtn').onclick=()=>{
  S.prices=parsePrices();const cap=Number(document.getElementById('capitalInput').value),allocation=Number(document.getElementById('allocationInput').value),maxStocks=Number(document.getElementById('maxStocksInput').value);
  if(!Number.isFinite(cap)||cap<=0||!Number.isFinite(allocation)||allocation<=0||!Number.isFinite(maxStocks)||maxStocks<1){alert('請檢查本金／單檔配額／持股上限');return}
  const sig=validatedSignals();const finite=simulate(sig,{infinite:false,capital:cap,allocation,maxStocks});const infinite=simulate(sig,{infinite:true,capital:0,allocation,maxStocks:999});
- S.results={finite,infinite};renderResults();showTab('result');
+ S.startingCapital=cap;S.results={finite,infinite};renderResults();showTab('result');
 };
-function renderResults(){
- const {finite,infinite}=S.results;document.getElementById('finitePnl').textContent=fmt(finite.realized);document.getElementById('finiteCash').textContent=fmt(finite.cash);document.getElementById('finiteSkip').textContent=finite.skipped.filter(x=>x.reason==='資金不足'||x.reason.includes('上限')).length;document.getElementById('infinitePnl').textContent=fmt(infinite.realized);document.getElementById('infiniteRounds').textContent=infinite.rounds.length;document.getElementById('infiniteTrades').textContent=infinite.filled;
- const rows=[...finite.rounds.map(r=>({...r,mode:'有限'})),...infinite.rounds.map(r=>({...r,mode:'無限'}))].sort((a,b)=>(a.end||'').localeCompare(b.end||''));document.getElementById('roundTable').innerHTML=rows.map(r=>'<tr class="border-t"><td class="p-3">'+r.mode+'</td><td class="p-3 font-bold">'+r.code+' '+r.name+'</td><td class="p-3">'+r.start+'</td><td class="p-3">'+r.end+'</td><td class="p-3 text-right font-black '+(r.pnl>=0?'text-red-600':'text-green-600')+'">'+fmt(r.pnl)+'</td><td class="p-3 text-right">'+r.pct.toFixed(2)+'%</td></tr>').join('')||'<tr><td colspan="6" class="p-6 text-center text-slate-400">尚無完整結算輪次</td></tr>';
- const skips=finite.skipped;document.getElementById('skipList').innerHTML=skips.slice(0,100).map(s=>'<div class="p-4 text-sm flex justify-between gap-3"><div><b>'+s.date+' '+s.code+' '+s.name+'</b><div class="text-xs text-slate-400 mt-1">'+escapeHtml(s.raw)+'</div></div><span class="text-xs font-bold text-orange-600 shrink-0">'+s.reason+'</span></div>').join('')||'<div class="p-6 text-center text-slate-400">沒有未成交指令</div>';
+function roundStats(result,mode){
+ const rounds=result.rounds||[];const wins=rounds.filter(r=>r.pnl>0).length;const invested=rounds.reduce((a,r)=>a+(r.buyCost||0),0);
+ return{rounds:rounds.length,wins,winRate:rounds.length?wins/rounds.length*100:0,returnPct:invested?result.realized/invested*100:0,invested};
 }
+function groupMonths(rounds){
+ const map={};(rounds||[]).forEach(r=>{const month=(r.end||'').slice(0,7);if(!month)return;if(!map[month])map[month]={month,pnl:0,cost:0,rounds:0,wins:0};const x=map[month];x.pnl+=r.pnl||0;x.cost+=r.buyCost||0;x.rounds++;if((r.pnl||0)>0)x.wins++;});
+ return Object.values(map).sort((a,b)=>a.month.localeCompare(b.month));
+}
+function openRows(result){
+ return Object.entries(result.pos||{}).filter(([,p])=>p.qty>0).map(([code,p])=>({code,name:p.name||'',qty:p.qty,cost:p.cost,avg:p.qty?p.cost/p.qty:0})).sort((a,b)=>b.cost-a.cost);
+}
+function renderReviewHistory(){
+ const box=document.getElementById('reviewHistory');const reviewed=S.review.filter(r=>Object.prototype.hasOwnProperty.call(S.decisions,r.id));
+ box.innerHTML=reviewed.map(r=>{const d=S.decisions[r.id]||{};const finalAction=d.action||r.action;const finalQty=d.qtyRule||r.qtyRule;const changed=!!(d.action||d.qtyRule);
+ return '<div class="p-4 text-sm"><div class="flex justify-between gap-3"><b>'+r.date+' '+r.code+' '+r.name+'</b><span class="text-xs font-black '+(finalAction==='忽略'?'text-slate-500':changed?'text-blue-600':'text-emerald-600')+'">'+(finalAction==='忽略'?'已排除':changed?'已修改':'確認正確')+'</span></div><div class="text-xs text-slate-500 mt-1">原判定：'+r.action+(r.qtyRule?' / '+r.qtyRule:'')+' → 最終：'+finalAction+(finalQty?' / '+finalQty:'')+'</div><div class="text-xs text-slate-400 mt-1">'+escapeHtml(r.raw)+'</div></div>';
+ }).join('')||'<div class="p-6 text-center text-slate-400">尚無人工覆核紀錄</div>';
+}
+function renderSettlementMode(){
+ if(!S.results)return;const mode=S.resultMode;const result=S.results[mode];const st=roundStats(result,mode);
+ document.querySelectorAll('.result-mode').forEach(b=>{const on=b.dataset.resultMode===mode;b.className='result-mode px-3 py-2 rounded-lg text-xs font-black '+(on?'bg-orange-600 text-white':'text-slate-500')});
+ document.getElementById('monthModeLabel').textContent=mode==='finite'?'有限本金':'無限本金';
+ document.getElementById('summaryPnl').textContent=fmt(result.realized);
+ document.getElementById('summaryPnl').className='text-2xl font-black mt-1 '+(result.realized>=0?'text-red-600':'text-green-600');
+ document.getElementById('summaryReturn').textContent=(st.returnPct>=0?'+':'')+st.returnPct.toFixed(2)+'%';
+ document.getElementById('summaryWinRate').textContent=st.winRate.toFixed(1)+'%';
+ document.getElementById('summaryRounds').textContent=st.rounds;
+ document.getElementById('summarySkipped').textContent=result.skipped.length;
+ const months=groupMonths(result.rounds);
+ document.getElementById('monthCards').innerHTML=months.map(m=>'<div class="rounded-2xl border '+(m.pnl>=0?'border-red-100 bg-red-50':'border-green-100 bg-green-50')+' p-4"><div class="flex justify-between items-start"><div><div class="text-xs text-slate-500 font-bold">'+m.month+'</div><div class="text-2xl font-black '+(m.pnl>=0?'text-red-600':'text-green-600')+' mt-1">'+fmt(m.pnl)+'</div></div><span class="text-xs font-black bg-white/80 rounded-full px-2 py-1">'+m.rounds+' 輪</span></div><div class="grid grid-cols-2 gap-2 text-xs mt-3 text-slate-600"><div>報酬率 <b>'+ (m.cost?((m.pnl/m.cost)*100).toFixed(2):'0.00') +'%</b></div><div>勝率 <b>'+((m.wins/m.rounds)*100).toFixed(0)+'%</b></div></div></div>').join('')||'<div class="col-span-full text-center text-slate-400 py-8">目前沒有完成結算的月份</div>';
+ const roundCount={};
+ document.getElementById('roundTable').innerHTML=(result.rounds||[]).slice().sort((a,b)=>(a.end||'').localeCompare(b.end||'')).map(r=>{roundCount[r.code]=(roundCount[r.code]||0)+1;return '<tr class="border-t"><td class="p-3 font-bold">'+r.code+' '+r.name+'</td><td class="p-3 text-center">第 '+roundCount[r.code]+' 輪</td><td class="p-3">'+r.start+'</td><td class="p-3">'+r.end+'</td><td class="p-3 text-right">'+fmt(r.buyCost)+'</td><td class="p-3 text-right font-black '+(r.pnl>=0?'text-red-600':'text-green-600')+'">'+fmt(r.pnl)+'</td><td class="p-3 text-right">'+(r.pct>=0?'+':'')+r.pct.toFixed(2)+'%</td></tr>'}).join('')||'<tr><td colspan="7" class="p-6 text-center text-slate-400">尚無完整結算輪次</td></tr>';
+ const skips=result.skipped||[];document.getElementById('skipList').innerHTML=skips.slice(0,120).map(s=>'<div class="p-4 text-sm flex justify-between gap-3"><div><b>'+s.date+' '+s.code+' '+s.name+'</b><div class="text-xs text-slate-400 mt-1">'+escapeHtml(s.raw)+'</div></div><span class="text-xs font-bold text-orange-600 shrink-0">'+s.reason+'</span></div>').join('')||'<div class="p-6 text-center text-slate-400">沒有未成交指令</div>';
+ const opens=openRows(result);document.getElementById('openPositions').innerHTML=opens.map(p=>'<div class="bg-slate-800 rounded-xl p-4 border border-slate-700"><div class="flex justify-between gap-2"><div><div class="font-black">'+p.code+' '+p.name+'</div><div class="text-xs text-slate-400 mt-1">尚未賣光，因此不計入已結算</div></div><span class="text-yellow-300 font-black">'+p.qty.toLocaleString('zh-TW')+' 股</span></div><div class="grid grid-cols-2 gap-3 mt-3 text-xs"><div><span class="text-slate-400">平均成本</span><b class="block text-white mt-1">'+p.avg.toFixed(2)+'</b></div><div><span class="text-slate-400">占用成本</span><b class="block text-white mt-1">'+fmt(p.cost)+'</b></div></div></div>').join('')||'<div class="col-span-full text-center text-slate-400 py-6">期末沒有未結算部位</div>';
+}
+function renderResults(){
+ const {finite,infinite}=S.results;
+ document.getElementById('finiteStart').textContent=fmt(S.startingCapital);
+ document.getElementById('finiteCash').textContent=fmt(finite.cash);
+ document.getElementById('finitePnl').textContent=fmt(finite.realized);
+ document.getElementById('finitePnl').className='block mt-1 '+(finite.realized>=0?'text-red-600':'text-green-600');
+ document.getElementById('infinitePnl').textContent=fmt(infinite.realized);
+ document.getElementById('infinitePnl').className='block mt-1 '+(infinite.realized>=0?'text-red-600':'text-green-600');
+ document.getElementById('infiniteRounds').textContent=infinite.rounds.length;
+ document.getElementById('infiniteTrades').textContent=infinite.filled;
+ renderReviewHistory();renderSettlementMode();lucide.createIcons();
+}
+document.querySelectorAll('.result-mode').forEach(b=>b.addEventListener('click',()=>{S.resultMode=b.dataset.resultMode;renderSettlementMode()}));
 lucide.createIcons();
 </script>
 </body>
