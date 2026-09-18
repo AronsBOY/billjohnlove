@@ -7,6 +7,8 @@
 <meta name="theme-color" content="#facc15">
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/lucide@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
 body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transparent}
@@ -124,6 +126,27 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
     </div>
 
     <div id="panel-result" class="panel hidden mt-5 space-y-5">
+      <div class="bg-white rounded-2xl border-2 border-yellow-200 shadow-lg p-4" data-no-export="true">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div>
+            <h3 class="font-black flex items-center gap-2"><i data-lucide="save"></i> 儲存與匯出</h3>
+            <p class="text-xs text-slate-500 mt-1">可保存本次回測，或輸出目前結果為 PNG、PDF、TXT。</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button id="saveResultBtn" type="button" class="bg-slate-900 text-yellow-300 px-4 py-2.5 rounded-xl font-black text-sm">儲存本次結果</button>
+            <button id="exportPngBtn" type="button" class="bg-orange-600 text-white px-4 py-2.5 rounded-xl font-black text-sm">匯出圖片 PNG</button>
+            <button id="exportPdfBtn" type="button" class="bg-red-600 text-white px-4 py-2.5 rounded-xl font-black text-sm">匯出 PDF</button>
+            <button id="exportTxtBtn" type="button" class="bg-blue-600 text-white px-4 py-2.5 rounded-xl font-black text-sm">匯出文字 TXT</button>
+          </div>
+        </div>
+        <div id="exportStatus" class="text-xs text-slate-500 mt-3">回測完成後即可儲存或匯出。</div>
+        <details class="mt-3">
+          <summary class="cursor-pointer text-sm font-bold text-slate-600">已儲存結果 <span id="savedCount" class="text-orange-600">0</span></summary>
+          <div id="savedList" class="mt-3 divide-y border rounded-xl overflow-hidden"></div>
+        </details>
+      </div>
+
+      <div id="exportArea" class="space-y-5">
       <div>
         <div class="flex items-center justify-between gap-3 mb-3">
           <div>
@@ -209,12 +232,13 @@ body{font-family:'Noto Sans TC',sans-serif;-webkit-tap-highlight-color:transpare
         <div class="p-5 border-b border-slate-700"><h3 class="font-black text-yellow-300">期末未結算部位</h3><p class="text-xs text-slate-300">這裡不是「持有庫存主頁」，只是交代回測截止日仍未賣光、因此尚未納入結算的資金。</p></div>
         <div id="openPositions" class="grid md:grid-cols-2 lg:grid-cols-3 gap-3 p-5"></div>
       </div>
+      </div>
     </div>
   </section>
 </main>
 
 <script>
-const S={raw:'',messages:[],signals:[],review:[],decisions:{},prices:new Map(),results:null,resultMode:'finite',startingCapital:5000000};
+const S={raw:'',sourceName:'',messages:[],signals:[],review:[],decisions:{},prices:new Map(),results:null,resultMode:'finite',startingCapital:5000000};
 const fmt=n=>'$'+Math.round(n||0).toLocaleString('zh-TW');
 const dateNorm=s=>String(s||'').replace(/\./g,'-').replace(/\//g,'-');
 function showTab(name){
@@ -223,7 +247,7 @@ function showTab(name){
  document.querySelectorAll('.tab').forEach(b=>{const on=b.dataset.tab===name;b.className='tab px-4 py-2 rounded-xl font-bold whitespace-nowrap '+(on?'bg-orange-600 text-white shadow-lg':'bg-white text-slate-500')});
 }
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.tab)));
-document.getElementById('fileInput').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;S.raw=await f.text();document.getElementById('parseBtn').disabled=false;});
+document.getElementById('fileInput').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;S.sourceName=f.name||'';S.raw=await f.text();document.getElementById('parseBtn').disabled=false;});
 
 function parseLine(text){
  const lines=text.split(/\r?\n/),out=[];let date='',cur=null;
@@ -442,7 +466,7 @@ document.getElementById('runBtn').onclick=async()=>{
    const cap=Number(document.getElementById('capitalInput').value),allocation=Number(document.getElementById('allocationInput').value),maxStocks=Number(document.getElementById('maxStocksInput').value);
    if(!Number.isFinite(cap)||cap<=0||!Number.isFinite(allocation)||allocation<=0||!Number.isFinite(maxStocks)||maxStocks<1)throw new Error('請檢查本金／單檔配額／持股上限');
    const sig=validatedSignals();const finite=simulate(sig,{infinite:false,capital:cap,allocation,maxStocks});const infinite=simulate(sig,{infinite:true,capital:0,allocation,maxStocks:999});
-   S.startingCapital=cap;S.results={finite,infinite};renderResults();showTab('result');
+   S.startingCapital=cap;S.results={finite,infinite};renderResults();saveLatestSnapshot();showTab('result');
  }catch(e){alert('回測失敗：'+e.message);}finally{b.disabled=false;b.textContent='抓取價格並執行雙模式回測';}
 };
 function roundStats(result,mode){
@@ -491,6 +515,166 @@ function renderResults(){
  document.getElementById('infiniteTrades').textContent=infinite.filled;
  renderReviewHistory();renderSettlementMode();lucide.createIcons();
 }
+
+const STORAGE_KEY='billjohn_backtest_saved_v1';
+const LATEST_KEY='billjohn_backtest_latest_v1';
+
+function safeStorageGet(key,fallback){
+ try{const raw=localStorage.getItem(key);return raw?JSON.parse(raw):fallback;}catch(e){return fallback;}
+}
+function safeStorageSet(key,value){
+ try{localStorage.setItem(key,JSON.stringify(value));return true;}catch(e){return false;}
+}
+function snapshotData(label){
+ if(!S.results)return null;
+ return{
+   id:'bt-'+Date.now(),
+   label:label||('回測 '+new Date().toLocaleString('zh-TW')),
+   createdAt:new Date().toISOString(),
+   sourceName:S.sourceName||'LINE 聊天紀錄',
+   startingCapital:S.startingCapital,
+   resultMode:S.resultMode,
+   settings:{
+     allocation:Number(document.getElementById('allocationInput').value)||0,
+     maxStocks:Number(document.getElementById('maxStocksInput').value)||0
+   },
+   counts:{
+     teacherMessages:S.messages.length,
+     signals:S.signals.filter(x=>x.action==='買入'||x.action==='賣出').length,
+     reviewed:Object.keys(S.decisions).length,
+     prices:S.prices.size
+   },
+   results:S.results
+ };
+}
+function saveLatestSnapshot(){
+ const snap=snapshotData('最近一次回測');
+ if(snap)safeStorageSet(LATEST_KEY,snap);
+}
+function savePermanentSnapshot(){
+ if(!S.results){alert('請先完成回測');return;}
+ const suggested='回測 '+new Date().toLocaleDateString('zh-TW')+' '+(S.sourceName||'');
+ const label=(prompt('這次結果要取什麼名稱？',suggested)||suggested).trim();
+ const snap=snapshotData(label);
+ const list=safeStorageGet(STORAGE_KEY,[]);
+ list.unshift(snap);
+ if(list.length>20)list.length=20;
+ if(!safeStorageSet(STORAGE_KEY,list)){alert('瀏覽器儲存空間不足，請先刪除舊紀錄或直接匯出檔案。');return;}
+ document.getElementById('exportStatus').textContent='已儲存：'+label+'（保存在這台裝置的瀏覽器）';
+ renderSavedList();
+}
+function loadSnapshot(snap){
+ if(!snap||!snap.results)return;
+ S.results=snap.results;
+ S.startingCapital=Number(snap.startingCapital)||5000000;
+ S.resultMode=snap.resultMode||'finite';
+ S.sourceName=snap.sourceName||'';
+ document.getElementById('capitalInput').value=S.startingCapital;
+ if(snap.settings){
+   if(snap.settings.allocation)document.getElementById('allocationInput').value=snap.settings.allocation;
+   if(snap.settings.maxStocks)document.getElementById('maxStocksInput').value=snap.settings.maxStocks;
+ }
+ renderResults();showTab('result');
+ document.getElementById('exportStatus').textContent='已載入儲存結果：'+(snap.label||'未命名');
+}
+function deleteSnapshot(id){
+ const list=safeStorageGet(STORAGE_KEY,[]).filter(x=>x.id!==id);
+ safeStorageSet(STORAGE_KEY,list);renderSavedList();
+}
+function renderSavedList(){
+ const list=safeStorageGet(STORAGE_KEY,[]);
+ document.getElementById('savedCount').textContent=list.length;
+ const box=document.getElementById('savedList');
+ box.innerHTML=list.map(x=>'<div class="p-3 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-2"><div><b class="text-sm">'+escapeHtml(x.label||'未命名')+'</b><div class="text-xs text-slate-400 mt-1">'+new Date(x.createdAt).toLocaleString('zh-TW')+'｜'+escapeHtml(x.sourceName||'')+'</div></div><div class="flex gap-2"><button type="button" data-load="'+x.id+'" class="px-3 py-2 rounded-lg bg-yellow-100 text-yellow-800 font-bold text-xs">載入</button><button type="button" data-del="'+x.id+'" class="px-3 py-2 rounded-lg bg-slate-100 text-slate-600 font-bold text-xs">刪除</button></div></div>').join('')||'<div class="p-4 text-center text-slate-400 text-sm">尚未儲存任何結果</div>';
+ box.querySelectorAll('[data-load]').forEach(b=>b.addEventListener('click',()=>{const snap=list.find(x=>x.id===b.dataset.load);if(snap)loadSnapshot(snap)}));
+ box.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{if(confirm('刪除這筆儲存結果？'))deleteSnapshot(b.dataset.del)}));
+}
+function fileStamp(){
+ const d=new Date();const p=n=>String(n).padStart(2,'0');
+ return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'_'+p(d.getHours())+p(d.getMinutes());
+}
+function downloadBlob(blob,name){
+ const a=document.createElement('a');const url=URL.createObjectURL(blob);a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+function currentReportText(){
+ if(!S.results)return '';
+ const mode=S.resultMode,result=S.results[mode],st=roundStats(result,mode),months=groupMonths(result.rounds),opens=openRows(result);
+ const lines=[];
+ lines.push('BILL JOHN 歷史回測結算');
+ lines.push('產生時間：'+new Date().toLocaleString('zh-TW'));
+ lines.push('資料來源：'+(S.sourceName||'LINE 聊天紀錄'));
+ lines.push('顯示模式：'+(mode==='finite'?'有限本金':'無限本金'));
+ lines.push('');
+ lines.push('【結算總覽】');
+ lines.push('已實現損益：'+fmt(result.realized));
+ lines.push('結算報酬率：'+st.returnPct.toFixed(2)+'%');
+ lines.push('勝率：'+st.winRate.toFixed(1)+'%');
+ lines.push('完整操作輪次：'+st.rounds);
+ lines.push('未成交指令：'+result.skipped.length);
+ if(mode==='finite'){lines.push('起始本金：'+fmt(S.startingCapital));lines.push('期末現金：'+fmt(result.cash));}
+ lines.push('');
+ lines.push('【月份結算】');
+ months.forEach(m=>lines.push(m.month+'｜'+fmt(m.pnl)+'｜'+(m.cost?(m.pnl/m.cost*100).toFixed(2):'0.00')+'%｜'+m.rounds+'輪'));
+ lines.push('');
+ lines.push('【個股完整操作輪次】');
+ const count={};
+ (result.rounds||[]).forEach(r=>{count[r.code]=(count[r.code]||0)+1;lines.push(r.code+' '+r.name+'｜第'+count[r.code]+'輪｜'+r.start+' → '+r.end+'｜成本 '+fmt(r.buyCost)+'｜損益 '+fmt(r.pnl)+'｜'+r.pct.toFixed(2)+'%')});
+ lines.push('');
+ lines.push('【期末未結算部位】');
+ if(!opens.length)lines.push('無');
+ opens.forEach(p=>lines.push(p.code+' '+p.name+'｜'+p.qty+'股｜均價 '+p.avg.toFixed(2)+'｜占用成本 '+fmt(p.cost)));
+ lines.push('');
+ lines.push('【未成交指令】');
+ if(!result.skipped.length)lines.push('無');
+ result.skipped.forEach(s=>lines.push(s.date+' '+s.code+' '+s.name+'｜'+s.reason));
+ return lines.join('\r\n');
+}
+async function renderExportCanvas(){
+ if(!S.results)throw new Error('請先完成回測');
+ const source=document.getElementById('exportArea');
+ if(!window.html2canvas)throw new Error('圖片輸出元件尚未載入');
+ return await window.html2canvas(source,{scale:1.5,useCORS:true,backgroundColor:'#fffbea',logging:false});
+}
+async function exportPng(){
+ const status=document.getElementById('exportStatus');status.textContent='正在產生 PNG…';
+ try{const canvas=await renderExportCanvas();canvas.toBlob(blob=>{if(blob)downloadBlob(blob,'billjohn_backtest_'+fileStamp()+'.png')},'image/png');status.textContent='PNG 已產生。';}
+ catch(e){status.textContent='PNG 匯出失敗：'+e.message;}
+}
+async function exportPdf(){
+ const status=document.getElementById('exportStatus');status.textContent='正在產生 PDF…';
+ try{
+   const canvas=await renderExportCanvas();
+   if(!window.jspdf||!window.jspdf.jsPDF)throw new Error('PDF 元件尚未載入');
+   const jsPDF=window.jspdf.jsPDF,pdf=new jsPDF('p','mm','a4');
+   const pageW=210,pageH=297,margin=8,imgW=pageW-margin*2,imgH=canvas.height*imgW/canvas.width;
+   const data=canvas.toDataURL('image/jpeg',0.92);
+   let y=margin,remaining=imgH;
+   pdf.addImage(data,'JPEG',margin,y,imgW,imgH);
+   remaining-=pageH-margin*2;
+   while(remaining>0){
+     pdf.addPage();
+     y=margin-(imgH-remaining);
+     pdf.addImage(data,'JPEG',margin,y,imgW,imgH);
+     remaining-=pageH-margin*2;
+   }
+   pdf.save('billjohn_backtest_'+fileStamp()+'.pdf');
+   status.textContent='PDF 已產生。';
+ }catch(e){status.textContent='PDF 匯出失敗：'+e.message;}
+}
+function exportTxt(){
+ if(!S.results){alert('請先完成回測');return;}
+ const text='\uFEFF'+currentReportText();
+ downloadBlob(new Blob([text],{type:'text/plain;charset=utf-8'}),'billjohn_backtest_'+fileStamp()+'.txt');
+ document.getElementById('exportStatus').textContent='TXT 已產生。';
+}
+document.getElementById('saveResultBtn').addEventListener('click',savePermanentSnapshot);
+document.getElementById('exportPngBtn').addEventListener('click',exportPng);
+document.getElementById('exportPdfBtn').addEventListener('click',exportPdf);
+document.getElementById('exportTxtBtn').addEventListener('click',exportTxt);
+renderSavedList();
+const latest=safeStorageGet(LATEST_KEY,null);
+if(latest&&latest.results)document.getElementById('exportStatus').textContent='瀏覽器中有最近一次回測紀錄；完成新回測後會自動更新。';
+
 document.querySelectorAll('.result-mode').forEach(b=>b.addEventListener('click',()=>{S.resultMode=b.dataset.resultMode;renderSettlementMode()}));
 lucide.createIcons();
 </script>
